@@ -42,6 +42,8 @@ import {
   AlertTriangle,
   Clock,
   LogOut,
+  Palette,
+  RefreshCw,
 } from "lucide-react"
 import {
   createAdminSession,
@@ -82,8 +84,17 @@ export default function AdminPage() {
     admin_username: "admin",
     admin_password: "password123",
   })
+  const [brandingSettings, setBrandingSettings] = useState({
+    business_name: "Loyalty Card App",
+    primary_color: "#3b82f6",
+    secondary_color: "#10b981",
+    logo_url: "",
+    welcome_message: "Join our loyalty program and earn rewards!",
+  })
   const [remainingTime, setRemainingTime] = useState(0)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
+  const [isSavingBranding, setIsSavingBranding] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // Customer deletion state
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([])
@@ -108,6 +119,17 @@ export default function AdminPage() {
       loadData()
     }
   }, [])
+
+  // Auto-refresh data every 30 seconds when authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const interval = setInterval(() => {
+      loadData()
+    }, 30000) // Refresh every 30 seconds
+
+    return () => clearInterval(interval)
+  }, [isAuthenticated])
 
   // Update remaining time every second
   useEffect(() => {
@@ -161,6 +183,12 @@ export default function AdminPage() {
     setLoginError("")
   }
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    await loadData()
+    setIsRefreshing(false)
+  }
+
   const loadData = async () => {
     try {
       // Load customers
@@ -190,6 +218,13 @@ export default function AdminPage() {
         const settingsData = await settingsResponse.json()
         setSettings(settingsData)
       }
+
+      // Load branding settings
+      const brandingResponse = await fetch("/api/admin/branding")
+      if (brandingResponse.ok) {
+        const brandingData = await brandingResponse.json()
+        setBrandingSettings(brandingData)
+      }
     } catch (error) {
       console.error("Failed to load data:", error)
     }
@@ -215,6 +250,29 @@ export default function AdminPage() {
       alert("Error saving settings")
     } finally {
       setIsSavingSettings(false)
+    }
+  }
+
+  const handleSaveBranding = async () => {
+    setIsSavingBranding(true)
+    try {
+      const response = await fetch("/api/admin/branding", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(brandingSettings),
+      })
+
+      if (response.ok) {
+        alert("Branding settings saved successfully!")
+      } else {
+        alert("Failed to save branding settings")
+      }
+    } catch (error) {
+      alert("Error saving branding settings")
+    } finally {
+      setIsSavingBranding(false)
     }
   }
 
@@ -491,6 +549,10 @@ export default function AdminPage() {
             <p className="text-gray-600">Manage your loyalty card system</p>
           </div>
           <div className="flex items-center space-x-4">
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
             <div className="flex items-center space-x-2 text-sm text-gray-600">
               <Clock className="h-4 w-4" />
               <span>Session: {formatRemainingTime(remainingTime)}</span>
@@ -509,11 +571,12 @@ export default function AdminPage() {
         </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="customers">Customers</TabsTrigger>
             <TabsTrigger value="items">Items</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="branding">Branding</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
 
@@ -557,7 +620,9 @@ export default function AdminPage() {
                 <div className="flex justify-between items-center">
                   <div>
                     <CardTitle>Customer Management</CardTitle>
-                    <CardDescription>All registered customers and their points</CardDescription>
+                    <CardDescription>
+                      All registered customers and their points (Auto-refreshes every 30 seconds)
+                    </CardDescription>
                   </div>
                   <div className="flex space-x-2">
                     {selectedCustomers.length > 0 && (
@@ -837,6 +902,108 @@ export default function AdminPage() {
 
                 <Button onClick={handleSaveSettings} className="w-full" disabled={isSavingSettings}>
                   {isSavingSettings ? "Saving..." : "Save Settings"}
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="branding" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Palette className="h-5 w-5" />
+                  Branding & Customization
+                </CardTitle>
+                <CardDescription>Customize the look and feel of your loyalty program</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="businessName">Business Name</Label>
+                    <Input
+                      id="businessName"
+                      type="text"
+                      value={brandingSettings.business_name}
+                      onChange={(e) => setBrandingSettings({ ...brandingSettings, business_name: e.target.value })}
+                      placeholder="Your Business Name"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="logoUrl">Logo URL (Optional)</Label>
+                    <Input
+                      id="logoUrl"
+                      type="url"
+                      value={brandingSettings.logo_url}
+                      onChange={(e) => setBrandingSettings({ ...brandingSettings, logo_url: e.target.value })}
+                      placeholder="https://example.com/logo.png"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="primaryColor">Primary Color</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="primaryColor"
+                        type="color"
+                        value={brandingSettings.primary_color}
+                        onChange={(e) => setBrandingSettings({ ...brandingSettings, primary_color: e.target.value })}
+                        className="w-16 h-10"
+                      />
+                      <Input
+                        type="text"
+                        value={brandingSettings.primary_color}
+                        onChange={(e) => setBrandingSettings({ ...brandingSettings, primary_color: e.target.value })}
+                        placeholder="#3b82f6"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="secondaryColor">Secondary Color</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="secondaryColor"
+                        type="color"
+                        value={brandingSettings.secondary_color}
+                        onChange={(e) => setBrandingSettings({ ...brandingSettings, secondary_color: e.target.value })}
+                        className="w-16 h-10"
+                      />
+                      <Input
+                        type="text"
+                        value={brandingSettings.secondary_color}
+                        onChange={(e) => setBrandingSettings({ ...brandingSettings, secondary_color: e.target.value })}
+                        placeholder="#10b981"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="welcomeMessage">Welcome Message</Label>
+                  <Textarea
+                    id="welcomeMessage"
+                    value={brandingSettings.welcome_message}
+                    onChange={(e) => setBrandingSettings({ ...brandingSettings, welcome_message: e.target.value })}
+                    placeholder="Join our loyalty program and earn rewards!"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Preview Section */}
+                <div className="mt-6 p-4 border rounded-lg bg-gray-50">
+                  <h4 className="font-medium mb-3">Preview</h4>
+                  <div
+                    className="p-4 rounded-lg text-white text-center"
+                    style={{ backgroundColor: brandingSettings.primary_color }}
+                  >
+                    <h3 className="text-xl font-bold">{brandingSettings.business_name}</h3>
+                    <p className="mt-2 opacity-90">{brandingSettings.welcome_message}</p>
+                  </div>
+                </div>
+
+                <Button onClick={handleSaveBranding} className="w-full" disabled={isSavingBranding}>
+                  {isSavingBranding ? "Saving..." : "Save Branding Settings"}
                 </Button>
               </CardContent>
             </Card>

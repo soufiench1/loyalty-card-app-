@@ -16,6 +16,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   const [isScanning, setIsScanning] = useState(false)
   const [error, setError] = useState<string>("")
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
+  const [lastScanTime, setLastScanTime] = useState<number>(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -41,12 +42,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
     try {
       setError("")
 
-      // Request camera permission
+      // Request camera permission with better constraints
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "environment", // Use back camera if available
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+          facingMode: { ideal: "environment" }, // Prefer back camera
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
         },
       })
 
@@ -55,11 +56,18 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.play()
-        setIsScanning(true)
 
-        // Start scanning loop
-        scanQRCode()
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          if (videoRef.current) {
+            videoRef.current.play()
+            setIsScanning(true)
+            // Start scanning after video is playing
+            setTimeout(() => {
+              scanQRCode()
+            }, 500)
+          }
+        }
       }
     } catch (err) {
       console.error("Error accessing camera:", err)
@@ -70,6 +78,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
           setError("Camera permission denied. Please allow camera access and try again.")
         } else if (err.name === "NotFoundError") {
           setError("No camera found on this device.")
+        } else if (err.name === "NotReadableError") {
+          setError("Camera is being used by another application.")
         } else {
           setError("Failed to access camera. Please check your device settings.")
         }
@@ -122,11 +132,16 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
         inversionAttempts: "dontInvert",
       })
 
-      if (code) {
-        console.log("QR Code detected:", code.data)
-        onScan(code.data)
-        stopScanning() // Stop scanning after successful detection
-        return
+      if (code && code.data) {
+        const now = Date.now()
+        // Prevent duplicate scans within 2 seconds
+        if (now - lastScanTime > 2000) {
+          console.log("QR Code detected:", code.data)
+          setLastScanTime(now)
+          onScan(code.data)
+          stopScanning() // Stop scanning after successful detection
+          return
+        }
       }
     } catch (err) {
       console.error("Error scanning QR code:", err)
@@ -164,6 +179,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
               className={`w-full max-w-md mx-auto rounded-lg border ${isScanning ? "block" : "hidden"}`}
               playsInline
               muted
+              autoPlay
             />
 
             {/* Scanning overlay */}
