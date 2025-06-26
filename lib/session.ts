@@ -5,7 +5,7 @@ export interface SessionData {
   userType: "admin" | "scan" // Track session type
 }
 
-const SESSION_DURATION = 30 * 60 * 1000 // 30 minutes in milliseconds
+const SESSION_DURATION = 60 * 60 * 1000 // 30 minutes in milliseconds
 const ADMIN_SESSION_KEY = "admin_session"
 const SCAN_SESSION_KEY = "scan_session"
 

@@ -1,5 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
+import type React from "react"
+
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,7 +29,20 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Shield, Users, BarChart3, ShoppingCart, Plus, Edit, Trash2, QrCode, UserX, AlertTriangle } from "lucide-react"
+import {
+  Shield,
+  Users,
+  BarChart3,
+  ShoppingCart,
+  Plus,
+  Edit,
+  Trash2,
+  QrCode,
+  UserX,
+  AlertTriangle,
+  Clock,
+  LogOut,
+} from "lucide-react"
 import {
   createAdminSession,
   isAdminSessionValid,
@@ -57,6 +72,7 @@ export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [loginError, setLoginError] = useState("")
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [stats, setStats] = useState({ totalCustomers: 0, totalPoints: 0, totalRewards: 0 })
@@ -109,8 +125,9 @@ export default function AdminPage() {
     return () => clearInterval(interval)
   }, [isAuthenticated])
 
-  const handleLogin = async (e: any) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
+    setLoginError("")
 
     try {
       const response = await fetch("/api/admin/login", {
@@ -126,17 +143,22 @@ export default function AdminPage() {
         setIsAuthenticated(true)
         setRemainingTime(getRemainingTime("admin"))
         loadData()
+        setUsername("")
+        setPassword("")
       } else {
-        alert("Invalid credentials")
+        setLoginError("Invalid credentials. Please check your username and password.")
       }
     } catch (error) {
-      alert("Login failed")
+      setLoginError("Login failed. Please try again.")
     }
   }
 
   const handleLogout = () => {
     clearAllSessions()
     setIsAuthenticated(false)
+    setUsername("")
+    setPassword("")
+    setLoginError("")
   }
 
   const loadData = async () => {
@@ -196,7 +218,7 @@ export default function AdminPage() {
     }
   }
 
-  const handleSaveItem = async (e: any) => {
+  const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault()
 
     try {
@@ -254,7 +276,7 @@ export default function AdminPage() {
 
     setIsDeleting(true)
     try {
-      const response = await fetch(`/api/admin/customers/${customerId}`, {
+      const response = await fetch(`/api/customers/${customerId}`, {
         method: "DELETE",
       })
 
@@ -262,7 +284,8 @@ export default function AdminPage() {
         loadData()
         alert("Customer deleted successfully!")
       } else {
-        alert("Failed to delete customer")
+        const errorData = await response.json()
+        alert(`Failed to delete customer: ${errorData.error || "Unknown error"}`)
       }
     } catch (error) {
       alert("Error deleting customer")
@@ -299,7 +322,8 @@ export default function AdminPage() {
         loadData()
         alert(`${selectedCustomers.length} customers deleted successfully!`)
       } else {
-        alert("Failed to delete selected customers")
+        const errorData = await response.json()
+        alert(`Failed to delete selected customers: ${errorData.error || "Unknown error"}`)
       }
     } catch (error) {
       alert("Error deleting customers")
@@ -344,7 +368,8 @@ export default function AdminPage() {
         loadData()
         alert("All customers deleted successfully!")
       } else {
-        alert("Failed to delete all customers")
+        const errorData = await response.json()
+        alert(`Failed to delete all customers: ${errorData.error || "Unknown error"}`)
       }
     } catch (error) {
       alert("Error deleting all customers")
@@ -426,6 +451,12 @@ export default function AdminPage() {
               </Button>
             </form>
 
+            {loginError && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                <p className="text-sm text-red-700">{loginError}</p>
+              </div>
+            )}
+
             {/* Default Credentials Info */}
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <h4 className="text-sm font-medium text-blue-900 mb-2">Default Credentials:</h4>
@@ -438,6 +469,12 @@ export default function AdminPage() {
                 </p>
               </div>
               <p className="text-xs text-blue-600 mt-2">Change these credentials in Settings after logging in.</p>
+            </div>
+
+            <div className="mt-4 text-center">
+              <Button variant="outline" asChild>
+                <a href="/">Back to Home</a>
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -454,12 +491,19 @@ export default function AdminPage() {
             <p className="text-gray-600">Manage your loyalty card system</p>
           </div>
           <div className="flex items-center space-x-4">
-            <div className="text-sm text-gray-600">Session: {formatRemainingTime(remainingTime)}</div>
+            <div className="flex items-center space-x-2 text-sm text-gray-600">
+              <Clock className="h-4 w-4" />
+              <span>Session: {formatRemainingTime(remainingTime)}</span>
+            </div>
             <Button asChild>
               <a href="/scan">
                 <QrCode className="mr-2 h-4 w-4" />
                 Scan QR Code
               </a>
+            </Button>
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Logout
             </Button>
           </div>
         </div>
@@ -571,7 +615,7 @@ export default function AdminPage() {
                       <div className="flex items-center space-x-2 pb-2 border-b">
                         <Checkbox
                           id="select-all"
-                          checked={selectedCustomers.length === customers.length}
+                          checked={selectedCustomers.length === customers.length && customers.length > 0}
                           onCheckedChange={handleSelectAllCustomers}
                         />
                         <Label htmlFor="select-all" className="text-sm font-medium">
@@ -813,12 +857,6 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
         </Tabs>
-
-        <div className="mt-8 text-center">
-          <Button variant="outline" onClick={handleLogout}>
-            Logout
-          </Button>
-        </div>
       </div>
     </div>
   )

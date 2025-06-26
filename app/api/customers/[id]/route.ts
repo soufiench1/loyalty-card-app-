@@ -47,11 +47,29 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   try {
     const customerId = params.id
 
-    // Delete customer (this will cascade delete related records due to foreign key constraints)
-    const { error } = await supabase.from("customers").delete().eq("id", customerId)
+    // First, delete all related records manually to avoid foreign key constraint issues
 
-    if (error) {
-      console.error("Delete customer error:", error)
+    // Delete point transactions
+    const { error: transactionError } = await supabase.from("point_transactions").delete().eq("customer_id", customerId)
+
+    if (transactionError) {
+      console.error("Delete transactions error:", transactionError)
+      // Continue anyway - might not have transactions
+    }
+
+    // Delete customer item points
+    const { error: pointsError } = await supabase.from("customer_item_points").delete().eq("customer_id", customerId)
+
+    if (pointsError) {
+      console.error("Delete customer points error:", pointsError)
+      // Continue anyway - might not have points
+    }
+
+    // Finally, delete the customer
+    const { error: customerError } = await supabase.from("customers").delete().eq("id", customerId)
+
+    if (customerError) {
+      console.error("Delete customer error:", customerError)
       return NextResponse.json({ error: "Failed to delete customer" }, { status: 500 })
     }
 
