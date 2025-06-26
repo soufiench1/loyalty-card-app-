@@ -128,6 +128,7 @@ export default function ScanPage() {
 
   const fetchCustomerPoints = async (customerId: string) => {
     try {
+      // Use the correct API endpoint that matches our route structure
       const response = await fetch(`/api/customers/${customerId}/points`)
       if (response.ok) {
         const data = await response.json()
@@ -137,6 +138,8 @@ export default function ScanPage() {
           totalRewards: data.totalRewards,
         })
       } else {
+        const errorData = await response.json()
+        console.error("Failed to fetch customer points:", errorData)
         setCustomerPoints({})
         setCustomerInfo(null)
       }

@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase"
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const customerId = params.id
+    console.log("Fetching customer points for ID:", customerId)
 
     // Get customer info
     const { data: customer, error: customerError } = await supabase
@@ -12,7 +13,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       .eq("id", customerId)
       .single()
 
-    if (customerError || !customer) {
+    if (customerError) {
+      console.error("Customer query error:", customerError)
+      return NextResponse.json({ error: "Customer not found" }, { status: 404 })
+    }
+
+    if (!customer) {
+      console.log("No customer found for ID:", customerId)
       return NextResponse.json({ error: "Customer not found" }, { status: 404 })
     }
 
@@ -23,6 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       .eq("customer_id", customerId)
 
     if (pointsError) {
+      console.error("Points query error:", pointsError)
       return NextResponse.json({ error: "Failed to fetch customer points" }, { status: 500 })
     }
 
@@ -31,6 +39,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     customerItemPoints?.forEach((record) => {
       itemPoints[record.item_id] = record.points
     })
+
+    console.log("Successfully fetched customer data:", { customerId, customerName: customer.name, itemPoints })
 
     return NextResponse.json({
       customerName: customer.name,
