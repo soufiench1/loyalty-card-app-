@@ -13,9 +13,21 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { Shield, Users, BarChart3, ShoppingCart, Plus, Edit, Trash2, QrCode } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Shield, Users, BarChart3, ShoppingCart, Plus, Edit, Trash2, QrCode, UserX, AlertTriangle } from "lucide-react"
 import {
   createAdminSession,
   isAdminSessionValid,
@@ -33,11 +45,19 @@ interface Item {
   is_active: boolean
 }
 
+interface Customer {
+  id: string
+  name: string
+  points: number
+  rewards: number
+  created_at: string
+}
+
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
-  const [customers, setCustomers] = useState([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [stats, setStats] = useState({ totalCustomers: 0, totalPoints: 0, totalRewards: 0 })
   const [settings, setSettings] = useState({
@@ -48,6 +68,10 @@ export default function AdminPage() {
   })
   const [remainingTime, setRemainingTime] = useState(0)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
+
+  // Customer deletion state
+  const [selectedCustomers, setSelectedCustomers] = useState<string[]>([])
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Item form state
   const [itemForm, setItemForm] = useState({
@@ -225,6 +249,126 @@ export default function AdminPage() {
     }
   }
 
+  const handleDeleteCustomer = async (customerId: string, customerName: string) => {
+    if (!confirm(`Are you sure you want to delete customer "${customerName}"? This action cannot be undone.`)) return
+
+    setIsDeleting(true)
+    try {
+      const response = await fetch(`/api/admin/customers/${customerId}`, {
+        method: "DELETE",
+      })
+
+      if (response.ok) {
+        loadData()
+        alert("Customer deleted successfully!")
+      } else {
+        alert("Failed to delete customer")
+      }
+    } catch (error) {
+      alert("Error deleting customer")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedCustomers.length === 0) {
+      alert("Please select customers to delete")
+      return
+    }
+
+    if (
+      !confirm(
+        `Are you sure you want to delete ${selectedCustomers.length} selected customers? This action cannot be undone.`,
+      )
+    )
+      return
+
+    setIsDeleting(true)
+    try {
+      const response = await fetch("/api/admin/customers/bulk-delete", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ customerIds: selectedCustomers }),
+      })
+
+      if (response.ok) {
+        setSelectedCustomers([])
+        loadData()
+        alert(`${selectedCustomers.length} customers deleted successfully!`)
+      } else {
+        alert("Failed to delete selected customers")
+      }
+    } catch (error) {
+      alert("Error deleting customers")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleDeleteAllCustomers = async () => {
+    if (
+      !confirm(
+        "⚠️ WARNING: This will delete ALL customers and their data permanently. This action cannot be undone. Are you absolutely sure?",
+      )
+    )
+      return
+
+    if (
+      !confirm(
+        "This is your final warning. Deleting all customers will remove all loyalty data, points, and transaction history. Type 'DELETE ALL' in the next prompt to confirm.",
+      )
+    )
+      return
+
+    const confirmation = prompt('Type "DELETE ALL" to confirm deletion of all customers:')
+    if (confirmation !== "DELETE ALL") {
+      alert("Deletion cancelled - confirmation text did not match")
+      return
+    }
+
+    setIsDeleting(true)
+    try {
+      const response = await fetch("/api/admin/customers/bulk-delete", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deleteAll: true }),
+      })
+
+      if (response.ok) {
+        setSelectedCustomers([])
+        loadData()
+        alert("All customers deleted successfully!")
+      } else {
+        alert("Failed to delete all customers")
+      }
+    } catch (error) {
+      alert("Error deleting all customers")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleSelectCustomer = (customerId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedCustomers([...selectedCustomers, customerId])
+    } else {
+      setSelectedCustomers(selectedCustomers.filter((id) => id !== customerId))
+    }
+  }
+
+  const handleSelectAllCustomers = (checked: boolean) => {
+    if (checked) {
+      setSelectedCustomers(customers.map((customer) => customer.id))
+    } else {
+      setSelectedCustomers([])
+    }
+  }
+
   const resetItemForm = () => {
     setItemForm({
       id: 0,
@@ -366,26 +510,108 @@ export default function AdminPage() {
           <TabsContent value="customers" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Customer List</CardTitle>
-                <CardDescription>All registered customers and their points</CardDescription>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle>Customer Management</CardTitle>
+                    <CardDescription>All registered customers and their points</CardDescription>
+                  </div>
+                  <div className="flex space-x-2">
+                    {selectedCustomers.length > 0 && (
+                      <Button variant="destructive" onClick={handleBulkDelete} disabled={isDeleting}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete Selected ({selectedCustomers.length})
+                      </Button>
+                    )}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" disabled={isDeleting || customers.length === 0}>
+                          <UserX className="mr-2 h-4 w-4" />
+                          Delete All Customers
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-red-500" />
+                            Delete All Customers
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="space-y-2">
+                            <p className="font-semibold text-red-600">⚠️ DANGER ZONE ⚠️</p>
+                            <p>
+                              This will permanently delete <strong>ALL {customers.length} customers</strong> and their
+                              associated data including:
+                            </p>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                              <li>Customer profiles and contact information</li>
+                              <li>All accumulated points for all items</li>
+                              <li>Reward redemption history</li>
+                              <li>Transaction logs and purchase history</li>
+                            </ul>
+                            <p className="font-semibold text-red-600">This action cannot be undone!</p>
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleDeleteAllCustomers} className="bg-red-600 hover:bg-red-700">
+                            I understand, Delete All
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   {customers.length === 0 ? (
-                    <p className="text-gray-500">No customers registered yet.</p>
+                    <p className="text-gray-500 text-center py-8">No customers registered yet.</p>
                   ) : (
-                    customers.map((customer: any) => (
-                      <div key={customer.id} className="flex justify-between items-center p-4 border rounded-lg">
-                        <div>
-                          <h3 className="font-medium">{customer.name}</h3>
-                          <p className="text-sm text-gray-500">ID: {customer.id}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium">{customer.points} points</p>
-                          <p className="text-sm text-gray-500">{customer.rewards} rewards</p>
-                        </div>
+                    <>
+                      {/* Select All Checkbox */}
+                      <div className="flex items-center space-x-2 pb-2 border-b">
+                        <Checkbox
+                          id="select-all"
+                          checked={selectedCustomers.length === customers.length}
+                          onCheckedChange={handleSelectAllCustomers}
+                        />
+                        <Label htmlFor="select-all" className="text-sm font-medium">
+                          Select All ({customers.length} customers)
+                        </Label>
                       </div>
-                    ))
+
+                      {/* Customer List */}
+                      {customers.map((customer) => (
+                        <div key={customer.id} className="flex items-center justify-between p-4 border rounded-lg">
+                          <div className="flex items-center space-x-3">
+                            <Checkbox
+                              checked={selectedCustomers.includes(customer.id)}
+                              onCheckedChange={(checked) => handleSelectCustomer(customer.id, checked as boolean)}
+                            />
+                            <div>
+                              <h3 className="font-medium">{customer.name}</h3>
+                              <p className="text-sm text-gray-500">ID: {customer.id}</p>
+                              <p className="text-xs text-gray-400">
+                                Joined: {new Date(customer.created_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-4">
+                            <div className="text-right">
+                              <p className="font-medium">{customer.points} points</p>
+                              <p className="text-sm text-gray-500">{customer.rewards} rewards</p>
+                            </div>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteCustomer(customer.id, customer.name)}
+                              disabled={isDeleting}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </>
                   )}
                 </div>
               </CardContent>
