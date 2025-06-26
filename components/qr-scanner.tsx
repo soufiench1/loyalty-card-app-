@@ -5,7 +5,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import jsQR from "jsqr"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Camera, CameraOff, RotateCcw, CheckCircle, AlertCircle } from "lucide-react"
+import { Camera, CameraOff, RotateCcw, CheckCircle } from "lucide-react"
 
 interface QRScannerProps {
   onScan: (result: string) => void
@@ -18,31 +18,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [lastScanTime, setLastScanTime] = useState<number>(0)
   const [scanSuccess, setScanSuccess] = useState<string>("")
-  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([])
-  const [currentDeviceIndex, setCurrentDeviceIndex] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Get available camera devices
-  const getCameraDevices = async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const videoDevices = devices.filter((device) => device.kind === "videoinput")
-      setCameraDevices(videoDevices)
-      console.log("Available cameras:", videoDevices.length)
-    } catch (error) {
-      console.error("Error getting camera devices:", error)
-    }
-  }
-
   // Auto-start scanning when component becomes active
   useEffect(() => {
     if (isActive && !isScanning) {
-      getCameraDevices().then(() => {
-        startScanning()
-      })
+      startScanning()
     } else if (!isActive && isScanning) {
       stopScanning()
     }
@@ -65,93 +49,36 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
         streamRef.current.getTracks().forEach((track) => track.stop())
       }
 
-      // Check if we have camera devices
-      if (cameraDevices.length === 0) {
-        await getCameraDevices()
+      // Request camera permission with specific constraints
+      const constraints = {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
+          frameRate: { ideal: 30, min: 15 },
+        },
       }
 
-      // Try different camera constraints in order of preference
-      const constraintOptions = [
-        // First try: Back camera with high quality
-        {
-          video: {
-            deviceId: cameraDevices[currentDeviceIndex]?.deviceId,
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 480 },
-            frameRate: { ideal: 30, min: 15 },
-          },
-        },
-        // Second try: Any back camera
-        {
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
-        // Third try: Any camera with basic constraints
-        {
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-          },
-        },
-        // Last resort: Any camera
-        {
-          video: true,
-        },
-      ]
-
-      let stream: MediaStream | null = null
-      let lastError: Error | null = null
-
-      for (const constraints of constraintOptions) {
-        try {
-          console.log("Trying camera constraints:", constraints)
-          stream = await navigator.mediaDevices.getUserMedia(constraints)
-          break
-        } catch (err) {
-          console.log("Camera constraint failed:", err)
-          lastError = err as Error
-          continue
-        }
-      }
-
-      if (!stream) {
-        throw lastError || new Error("No camera access available")
-      }
-
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
       streamRef.current = stream
       setHasPermission(true)
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
 
-        // Wait for video metadata to load
-        videoRef.current.onloadedmetadata = () => {
-          if (videoRef.current) {
-            const playPromise = videoRef.current.play()
+        // Wait for video to load and start playing
+        const playPromise = videoRef.current.play()
 
-            if (playPromise !== undefined) {
-              playPromise
-                .then(() => {
-                  console.log("Video started playing")
-                  setIsScanning(true)
-                  startScanningLoop()
-                })
-                .catch((error) => {
-                  console.error("Error playing video:", error)
-                  setError("Failed to start video playback. Try refreshing the page.")
-                })
-            }
-          }
-        }
-
-        // Handle video errors
-        videoRef.current.onerror = (e) => {
-          console.error("Video error:", e)
-          setError("Video playback error. Please try again.")
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setIsScanning(true)
+              startScanningLoop()
+            })
+            .catch((error) => {
+              console.error("Error playing video:", error)
+              setError("Failed to start video playback")
+            })
         }
       }
     } catch (err) {
@@ -162,31 +89,43 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
       if (err instanceof Error) {
         switch (err.name) {
           case "NotAllowedError":
-            setError(
-              "Camera permission denied. Please allow camera access in your browser settings and refresh the page.",
-            )
+            setError("Camera permission denied. Please allow camera access and refresh the page.")
             break
           case "NotFoundError":
-            setError("No camera found on this device. Please ensure you have a working camera.")
+            setError("No camera found on this device.")
             break
           case "NotReadableError":
-            setError("Camera is being used by another application. Please close other apps using the camera.")
+            setError("Camera is being used by another application.")
             break
           case "OverconstrainedError":
-            setError("Camera constraints not supported. Trying with different settings...")
-            // Try with next camera device if available
-            if (currentDeviceIndex < cameraDevices.length - 1) {
-              setCurrentDeviceIndex(currentDeviceIndex + 1)
-              setTimeout(() => startScanning(), 1000)
-            }
-            break
-          case "SecurityError":
-            setError("Camera access blocked by security policy. Please use HTTPS or localhost.")
+            setError("Camera constraints not supported. Trying with basic settings...")
+            // Try again with basic constraints
+            setTimeout(() => tryBasicCamera(), 1000)
             break
           default:
-            setError(`Camera error: ${err.message}. Please try refreshing the page.`)
+            setError(`Camera error: ${err.message}`)
         }
       }
+    }
+  }
+
+  const tryBasicCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      })
+      streamRef.current = stream
+      setHasPermission(true)
+      setError("")
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+        setIsScanning(true)
+        startScanningLoop()
+      }
+    } catch (err) {
+      setError("Failed to access camera with basic settings")
     }
   }
 
@@ -197,7 +136,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
     scanIntervalRef.current = setInterval(() => {
       scanQRCode()
-    }, 150) // Scan every 150ms for better performance
+    }, 100) // Scan every 100ms for better responsiveness
   }
 
   const stopScanning = () => {
@@ -229,29 +168,27 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
       return
     }
 
+    // Set canvas dimensions to match video
+    const { videoWidth, videoHeight } = video
+    canvas.width = videoWidth
+    canvas.height = videoHeight
+
+    // Draw video frame to canvas
+    context.drawImage(video, 0, 0, videoWidth, videoHeight)
+
     try {
-      // Set canvas dimensions to match video
-      const { videoWidth, videoHeight } = video
-      if (videoWidth === 0 || videoHeight === 0) return
-
-      canvas.width = videoWidth
-      canvas.height = videoHeight
-
-      // Draw video frame to canvas
-      context.drawImage(video, 0, 0, videoWidth, videoHeight)
-
       // Get image data for QR code detection
       const imageData = context.getImageData(0, 0, videoWidth, videoHeight)
 
-      // Detect QR code using jsQR with optimized options
+      // Detect QR code using jsQR with better options
       const code = jsQR(imageData.data, imageData.width, imageData.height, {
         inversionAttempts: "dontInvert",
       })
 
       if (code && code.data && code.data.trim()) {
         const now = Date.now()
-        // Prevent duplicate scans within 2 seconds
-        if (now - lastScanTime > 2000) {
+        // Prevent duplicate scans within 3 seconds
+        if (now - lastScanTime > 3000) {
           console.log("QR Code detected:", code.data)
           setLastScanTime(now)
           setScanSuccess(`Successfully scanned: ${code.data}`)
@@ -260,7 +197,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
           // Stop scanning after successful detection
           setTimeout(() => {
             stopScanning()
-          }, 1500)
+          }, 1000)
         }
       }
     } catch (err) {
@@ -276,17 +213,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
     }
   }
 
-  const switchCamera = () => {
-    if (cameraDevices.length > 1) {
-      const nextIndex = (currentDeviceIndex + 1) % cameraDevices.length
-      setCurrentDeviceIndex(nextIndex)
-      if (isScanning) {
-        stopScanning()
-        setTimeout(() => startScanning(), 500)
-      }
-    }
-  }
-
   return (
     <Card>
       <CardContent className="p-6">
@@ -296,11 +222,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
             <p className="text-sm text-gray-600">
               {isScanning ? "Point camera at QR code - scanning..." : "Click start to begin scanning"}
             </p>
-            {cameraDevices.length > 1 && (
-              <p className="text-xs text-gray-500">
-                Camera {currentDeviceIndex + 1} of {cameraDevices.length}
-              </p>
-            )}
           </div>
 
           <div className="relative">
@@ -353,21 +274,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
           {/* Error message */}
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-red-600" />
-              <div className="flex-1">
-                <p className="text-sm text-red-700">{error}</p>
-                {error.includes("permission") && (
-                  <div className="mt-2 text-xs text-red-600">
-                    <p>To fix this:</p>
-                    <ul className="list-disc list-inside mt-1">
-                      <li>Click the camera icon in your browser's address bar</li>
-                      <li>Select "Allow" for camera access</li>
-                      <li>Refresh the page</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
+            <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
 
@@ -391,13 +299,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
               )}
             </Button>
 
-            {cameraDevices.length > 1 && (
-              <Button onClick={switchCamera} variant="outline" className="flex items-center gap-2">
-                <RotateCcw className="h-4 w-4" />
-                Switch Camera
-              </Button>
-            )}
-
             {error && hasPermission === false && (
               <Button onClick={startScanning} variant="outline" className="flex items-center gap-2">
                 <RotateCcw className="h-4 w-4" />
@@ -410,7 +311,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
             <p>• Make sure the QR code is clearly visible and well-lit</p>
             <p>• Hold steady for 2-3 seconds</p>
             <p>• Try different angles if scanning fails</p>
-            <p>• Use HTTPS or localhost for camera access</p>
           </div>
         </div>
       </CardContent>
