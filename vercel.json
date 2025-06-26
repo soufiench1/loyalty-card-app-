@@ -5,8 +5,8 @@
     }
   },
   "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key",
-    "JWT_SECRET": "@jwt-secret"
+    "NEXT_PUBLIC_SUPABASE_URL": "",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "",
+    "JWT_SECRET": ""
   }
 }
