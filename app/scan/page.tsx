@@ -42,6 +42,9 @@ export default function ScanPage() {
   const [message, setMessage] = useState("")
   const [activeTab, setActiveTab] = useState("scan")
 
+  const [customerPoints, setCustomerPoints] = useState<{ [itemId: number]: number }>({})
+  const [customerInfo, setCustomerInfo] = useState<{ name: string; totalRewards: number } | null>(null)
+
   // Check session on mount - check both admin and scan sessions
   useEffect(() => {
     if (isScanSessionValid() || isAdminSessionValid()) {
@@ -115,9 +118,33 @@ export default function ScanPage() {
     }
   }
 
-  const handleQRScan = (result: string) => {
+  const handleQRScan = async (result: string) => {
     setCustomerId(result)
     setActiveTab("manual") // Switch to manual tab after scanning
+
+    // Fetch customer points for all items
+    await fetchCustomerPoints(result)
+  }
+
+  const fetchCustomerPoints = async (customerId: string) => {
+    try {
+      const response = await fetch(`/api/customers/${customerId}/points`)
+      if (response.ok) {
+        const data = await response.json()
+        setCustomerPoints(data.itemPoints || {})
+        setCustomerInfo({
+          name: data.customerName,
+          totalRewards: data.totalRewards,
+        })
+      } else {
+        setCustomerPoints({})
+        setCustomerInfo(null)
+      }
+    } catch (error) {
+      console.error("Failed to fetch customer points:", error)
+      setCustomerPoints({})
+      setCustomerInfo(null)
+    }
   }
 
   const handleAddPoints = async (e: React.FormEvent) => {
@@ -143,7 +170,10 @@ export default function ScanPage() {
         setMessage(
           `Points added for ${data.itemName}! Customer now has ${data.totalItemPoints} points for this item. ${data.rewardEarned ? "Reward earned!" : ""}`,
         )
-        setCustomerId("")
+
+        // Refresh customer points after adding
+        await fetchCustomerPoints(customerId)
+
         setSelectedItemId("")
       } else {
         setMessage(data.error || "Failed to add points")
@@ -309,6 +339,28 @@ export default function ScanPage() {
                       Customer can provide their ID manually or you can scan their QR code
                     </p>
                   </div>
+
+                  {customerInfo && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h4 className="font-medium text-blue-900 mb-2">Customer: {customerInfo.name}</h4>
+                      <p className="text-sm text-blue-700 mb-2">Total Rewards Earned: {customerInfo.totalRewards}</p>
+                      <div className="text-sm text-blue-700">
+                        <p className="font-medium mb-1">Current Points per Item:</p>
+                        {items.length > 0 ? (
+                          <div className="grid grid-cols-1 gap-1">
+                            {items.map((item) => (
+                              <div key={item.id} className="flex justify-between">
+                                <span>{item.name}:</span>
+                                <span className="font-medium">{customerPoints[item.id] || 0} points</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p>No items available</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="item">Item Purchased</Label>
