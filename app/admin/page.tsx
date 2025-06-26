@@ -48,6 +48,8 @@ import {
   Calendar,
   Award,
   Activity,
+  Wifi,
+  WifiOff,
 } from "lucide-react"
 import {
   createAdminSession,
@@ -119,6 +121,8 @@ export default function AdminPage() {
   const [isSavingBranding, setIsSavingBranding] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
+  const [isOnline, setIsOnline] = useState(true)
+  const [syncError, setSyncError] = useState<string>("")
 
   // Customer deletion state
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([])
@@ -136,60 +140,103 @@ export default function AdminPage() {
   const [isItemDialogOpen, setIsItemDialogOpen] = useState(false)
   const [isEditingItem, setIsEditingItem] = useState(false)
 
-  // Real-time data loading function
+  // Network status monitoring
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true)
+      setSyncError("")
+      if (isAuthenticated) {
+        loadData(false) // Sync when back online
+      }
+    }
+
+    const handleOffline = () => {
+      setIsOnline(false)
+      setSyncError("No internet connection")
+    }
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [isAuthenticated])
+
+  // Enhanced data loading function with better error handling
   const loadData = useCallback(async (showLoading = false) => {
     if (showLoading) setIsRefreshing(true)
+    setSyncError("")
 
     try {
-      // Load all data in parallel for better performance
-      const [customersRes, itemsRes, statsRes, settingsRes, brandingRes, analyticsRes] = await Promise.all([
-        fetch("/api/admin/customers"),
-        fetch("/api/items"),
-        fetch("/api/admin/stats"),
-        fetch("/api/admin/settings"),
-        fetch("/api/admin/branding"),
-        fetch("/api/admin/analytics"),
-      ])
+      // Add timeout to requests for better error handling
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), 10000))
+
+      // Load all data in parallel with timeout
+      const dataPromises = [
+        Promise.race([fetch("/api/admin/customers"), timeoutPromise]),
+        Promise.race([fetch("/api/items"), timeoutPromise]),
+        Promise.race([fetch("/api/admin/stats"), timeoutPromise]),
+        Promise.race([fetch("/api/admin/settings"), timeoutPromise]),
+        Promise.race([fetch("/api/admin/branding"), timeoutPromise]),
+        Promise.race([fetch("/api/admin/analytics"), timeoutPromise]),
+      ]
+
+      const [customersRes, itemsRes, statsRes, settingsRes, brandingRes, analyticsRes] = await Promise.all(dataPromises)
 
       // Process customers
-      if (customersRes.ok) {
+      if (customersRes instanceof Response && customersRes.ok) {
         const customersData = await customersRes.json()
         setCustomers(customersData)
+      } else {
+        console.error("Failed to load customers")
       }
 
       // Process items
-      if (itemsRes.ok) {
+      if (itemsRes instanceof Response && itemsRes.ok) {
         const itemsData = await itemsRes.json()
         setItems(itemsData)
+      } else {
+        console.error("Failed to load items")
       }
 
       // Process stats
-      if (statsRes.ok) {
+      if (statsRes instanceof Response && statsRes.ok) {
         const statsData = await statsRes.json()
         setStats(statsData)
+      } else {
+        console.error("Failed to load stats")
       }
 
       // Process settings
-      if (settingsRes.ok) {
+      if (settingsRes instanceof Response && settingsRes.ok) {
         const settingsData = await settingsRes.json()
         setSettings(settingsData)
+      } else {
+        console.error("Failed to load settings")
       }
 
       // Process branding
-      if (brandingRes.ok) {
+      if (brandingRes instanceof Response && brandingRes.ok) {
         const brandingData = await brandingRes.json()
         setBrandingSettings(brandingData)
+      } else {
+        console.error("Failed to load branding")
       }
 
       // Process analytics
-      if (analyticsRes.ok) {
+      if (analyticsRes instanceof Response && analyticsRes.ok) {
         const analyticsData = await analyticsRes.json()
         setAnalytics(analyticsData)
+      } else {
+        console.error("Failed to load analytics")
       }
 
       setLastUpdate(new Date())
     } catch (error) {
       console.error("Failed to load data:", error)
+      setSyncError("Failed to sync data. Check your internet connection.")
     } finally {
       if (showLoading) setIsRefreshing(false)
     }
@@ -203,16 +250,16 @@ export default function AdminPage() {
     }
   }, [loadData])
 
-  // Real-time sync - refresh every 10 seconds when authenticated
+  // More aggressive real-time sync for Vercel - every 5 seconds
   useEffect(() => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated || !isOnline) return
 
     const interval = setInterval(() => {
-      loadData(false) // Silent refresh
-    }, 10000) // Every 10 seconds
+      loadData(false) // Silent refresh every 5 seconds
+    }, 5000)
 
     return () => clearInterval(interval)
-  }, [isAuthenticated, loadData])
+  }, [isAuthenticated, isOnline, loadData])
 
   // Update remaining time every second
   useEffect(() => {
@@ -283,6 +330,8 @@ export default function AdminPage() {
 
       if (response.ok) {
         alert("Settings saved successfully!")
+        // Refresh data after saving
+        await loadData(false)
       } else {
         alert("Failed to save settings")
       }
@@ -306,6 +355,8 @@ export default function AdminPage() {
 
       if (response.ok) {
         alert("Branding settings saved successfully!")
+        // Refresh data after saving
+        await loadData(false)
       } else {
         alert("Failed to save branding settings")
       }
@@ -586,9 +637,16 @@ export default function AdminPage() {
         <div className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-            <p className="text-gray-600">
-              Manage your loyalty card system • Last updated: {lastUpdate.toLocaleTimeString()}
-            </p>
+            <div className="flex items-center gap-4 mt-2">
+              <p className="text-gray-600">Last updated: {lastUpdate.toLocaleTimeString()}</p>
+              <div className="flex items-center gap-2">
+                {isOnline ? <Wifi className="h-4 w-4 text-green-600" /> : <WifiOff className="h-4 w-4 text-red-600" />}
+                <span className={`text-xs ${isOnline ? "text-green-600" : "text-red-600"}`}>
+                  {isOnline ? "Online" : "Offline"}
+                </span>
+              </div>
+              {syncError && <p className="text-xs text-red-600">{syncError}</p>}
+            </div>
           </div>
           <div className="flex items-center space-x-4">
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
@@ -687,7 +745,7 @@ export default function AdminPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Recent Activity</CardTitle>
-                  <CardDescription>Latest customer transactions</CardDescription>
+                  <CardDescription>Latest customer transactions (Auto-updates every 5 seconds)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
@@ -720,7 +778,7 @@ export default function AdminPage() {
                   <div>
                     <CardTitle>Customer Management</CardTitle>
                     <CardDescription>
-                      All registered customers and their points (Updates every 10 seconds)
+                      All registered customers and their points (Auto-updates every 5 seconds)
                     </CardDescription>
                   </div>
                   <div className="flex space-x-2">
@@ -1167,7 +1225,7 @@ export default function AdminPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Recent Transactions</CardTitle>
-                  <CardDescription>Latest customer activity</CardDescription>
+                  <CardDescription>Latest customer activity (Real-time updates)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
