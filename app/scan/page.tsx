@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { QrCode, Plus, Keyboard, Shield, Clock, LogOut } from "lucide-react"
+import { QrCode, Plus, Keyboard, Shield, Clock, LogOut, CheckCircle } from "lucide-react"
 import QRScanner from "@/components/qr-scanner"
 import {
   isScanSessionValid,
@@ -104,6 +104,8 @@ export default function ScanPage() {
     setSelectedItemId("")
     setMessage("")
     setActiveTab("scan")
+    setCustomerInfo(null)
+    setCustomerPoints({})
   }
 
   const loadItems = async () => {
@@ -119,6 +121,7 @@ export default function ScanPage() {
   }
 
   const handleQRScan = async (result: string) => {
+    console.log("QR Scan result:", result)
     setCustomerId(result)
     setActiveTab("manual") // Switch to manual tab after scanning
 
@@ -128,25 +131,30 @@ export default function ScanPage() {
 
   const fetchCustomerPoints = async (customerId: string) => {
     try {
-      // Use the correct API endpoint that matches our route structure
+      console.log("Fetching customer points for:", customerId)
       const response = await fetch(`/api/customers/${customerId}/points`)
+
       if (response.ok) {
         const data = await response.json()
+        console.log("Customer data received:", data)
         setCustomerPoints(data.itemPoints || {})
         setCustomerInfo({
           name: data.customerName,
           totalRewards: data.totalRewards,
         })
+        setMessage(`Customer found: ${data.customerName}`)
       } else {
         const errorData = await response.json()
         console.error("Failed to fetch customer points:", errorData)
         setCustomerPoints({})
         setCustomerInfo(null)
+        setMessage(`Customer not found: ${errorData.error}`)
       }
     } catch (error) {
       console.error("Failed to fetch customer points:", error)
       setCustomerPoints({})
       setCustomerInfo(null)
+      setMessage("Error fetching customer data")
     }
   }
 
@@ -171,7 +179,7 @@ export default function ScanPage() {
 
       if (response.ok) {
         setMessage(
-          `Points added for ${data.itemName}! Customer now has ${data.totalItemPoints} points for this item. ${data.rewardEarned ? "Reward earned!" : ""}`,
+          `✅ Points added for ${data.itemName}! Customer now has ${data.totalItemPoints} points for this item. ${data.rewardEarned ? "🎉 Reward earned!" : ""}`,
         )
 
         // Refresh customer points after adding
@@ -179,10 +187,10 @@ export default function ScanPage() {
 
         setSelectedItemId("")
       } else {
-        setMessage(data.error || "Failed to add points")
+        setMessage(`❌ ${data.error || "Failed to add points"}`)
       }
     } catch (error) {
-      setMessage("Network error. Please try again.")
+      setMessage("❌ Network error. Please try again.")
     } finally {
       setIsLoading(false)
     }
@@ -304,7 +312,11 @@ export default function ScanPage() {
               <Card>
                 <CardContent className="pt-6">
                   <div className="text-center">
-                    <p className="text-sm text-gray-600">Scanned Customer ID:</p>
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                      <p className="text-sm font-medium text-green-700">QR Code Scanned Successfully!</p>
+                    </div>
+                    <p className="text-sm text-gray-600">Customer ID:</p>
                     <code className="bg-gray-100 px-3 py-1 rounded text-sm font-mono">{customerId}</code>
                     <p className="text-xs text-green-600 mt-2">
                       Switch to Manual Entry tab to complete the transaction
@@ -335,7 +347,12 @@ export default function ScanPage() {
                       type="text"
                       placeholder="Enter customer ID or scan QR code"
                       value={customerId}
-                      onChange={(e) => setCustomerId(e.target.value)}
+                      onChange={(e) => {
+                        setCustomerId(e.target.value)
+                        if (e.target.value) {
+                          fetchCustomerPoints(e.target.value)
+                        }
+                      }}
                       required
                     />
                     <p className="text-xs text-gray-500">
@@ -394,9 +411,11 @@ export default function ScanPage() {
                 {message && (
                   <div
                     className={`mt-4 p-3 rounded-md text-sm ${
-                      message.includes("added") || message.includes("earned")
+                      message.includes("✅") || message.includes("🎉")
                         ? "bg-green-50 text-green-700 border border-green-200"
-                        : "bg-red-50 text-red-700 border border-red-200"
+                        : message.includes("❌")
+                          ? "bg-red-50 text-red-700 border border-red-200"
+                          : "bg-blue-50 text-blue-700 border border-blue-200"
                     }`}
                   >
                     {message}

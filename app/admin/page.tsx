@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import type React from "react"
 
 import { Button } from "@/components/ui/button"
@@ -44,6 +44,10 @@ import {
   LogOut,
   Palette,
   RefreshCw,
+  TrendingUp,
+  Calendar,
+  Award,
+  Activity,
 } from "lucide-react"
 import {
   createAdminSession,
@@ -70,6 +74,24 @@ interface Customer {
   created_at: string
 }
 
+interface Analytics {
+  totalCustomers: number
+  totalRewards: number
+  totalTransactions: number
+  averagePointsPerCustomer: number
+  topItems: Array<{ name: string; count: number }>
+  recentTransactions: Array<{
+    id: number
+    customer_name: string
+    item_name: string
+    points_added: number
+    reward_earned: boolean
+    created_at: string
+  }>
+  customerGrowth: Array<{ date: string; count: number }>
+  rewardTrends: Array<{ date: string; rewards: number }>
+}
+
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [username, setUsername] = useState("")
@@ -78,6 +100,7 @@ export default function AdminPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [stats, setStats] = useState({ totalCustomers: 0, totalPoints: 0, totalRewards: 0 })
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
   const [settings, setSettings] = useState({
     store_pin: "1234",
     points_for_reward: 10,
@@ -95,6 +118,7 @@ export default function AdminPage() {
   const [isSavingSettings, setIsSavingSettings] = useState(false)
   const [isSavingBranding, setIsSavingBranding] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
 
   // Customer deletion state
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([])
@@ -112,24 +136,83 @@ export default function AdminPage() {
   const [isItemDialogOpen, setIsItemDialogOpen] = useState(false)
   const [isEditingItem, setIsEditingItem] = useState(false)
 
+  // Real-time data loading function
+  const loadData = useCallback(async (showLoading = false) => {
+    if (showLoading) setIsRefreshing(true)
+
+    try {
+      // Load all data in parallel for better performance
+      const [customersRes, itemsRes, statsRes, settingsRes, brandingRes, analyticsRes] = await Promise.all([
+        fetch("/api/admin/customers"),
+        fetch("/api/items"),
+        fetch("/api/admin/stats"),
+        fetch("/api/admin/settings"),
+        fetch("/api/admin/branding"),
+        fetch("/api/admin/analytics"),
+      ])
+
+      // Process customers
+      if (customersRes.ok) {
+        const customersData = await customersRes.json()
+        setCustomers(customersData)
+      }
+
+      // Process items
+      if (itemsRes.ok) {
+        const itemsData = await itemsRes.json()
+        setItems(itemsData)
+      }
+
+      // Process stats
+      if (statsRes.ok) {
+        const statsData = await statsRes.json()
+        setStats(statsData)
+      }
+
+      // Process settings
+      if (settingsRes.ok) {
+        const settingsData = await settingsRes.json()
+        setSettings(settingsData)
+      }
+
+      // Process branding
+      if (brandingRes.ok) {
+        const brandingData = await brandingRes.json()
+        setBrandingSettings(brandingData)
+      }
+
+      // Process analytics
+      if (analyticsRes.ok) {
+        const analyticsData = await analyticsRes.json()
+        setAnalytics(analyticsData)
+      }
+
+      setLastUpdate(new Date())
+    } catch (error) {
+      console.error("Failed to load data:", error)
+    } finally {
+      if (showLoading) setIsRefreshing(false)
+    }
+  }, [])
+
   // Check session on mount
   useEffect(() => {
     if (isAdminSessionValid()) {
       setIsAuthenticated(true)
-      loadData()
+      loadData(true)
     }
-  }, [])
+  }, [loadData])
 
-  // Auto-refresh data every 30 seconds when authenticated
+  // Real-time sync - refresh every 10 seconds when authenticated
   useEffect(() => {
     if (!isAuthenticated) return
 
     const interval = setInterval(() => {
-      loadData()
-    }, 30000) // Refresh every 30 seconds
+      loadData(false) // Silent refresh
+    }, 10000) // Every 10 seconds
 
     return () => clearInterval(interval)
-  }, [isAuthenticated])
+  }, [isAuthenticated, loadData])
 
   // Update remaining time every second
   useEffect(() => {
@@ -164,7 +247,7 @@ export default function AdminPage() {
         createAdminSession() // This also creates scan session
         setIsAuthenticated(true)
         setRemainingTime(getRemainingTime("admin"))
-        loadData()
+        loadData(true)
         setUsername("")
         setPassword("")
       } else {
@@ -184,50 +267,7 @@ export default function AdminPage() {
   }
 
   const handleRefresh = async () => {
-    setIsRefreshing(true)
-    await loadData()
-    setIsRefreshing(false)
-  }
-
-  const loadData = async () => {
-    try {
-      // Load customers
-      const customersResponse = await fetch("/api/admin/customers")
-      if (customersResponse.ok) {
-        const customersData = await customersResponse.json()
-        setCustomers(customersData)
-      }
-
-      // Load items
-      const itemsResponse = await fetch("/api/items")
-      if (itemsResponse.ok) {
-        const itemsData = await itemsResponse.json()
-        setItems(itemsData)
-      }
-
-      // Load stats
-      const statsResponse = await fetch("/api/admin/stats")
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json()
-        setStats(statsData)
-      }
-
-      // Load settings
-      const settingsResponse = await fetch("/api/admin/settings")
-      if (settingsResponse.ok) {
-        const settingsData = await settingsResponse.json()
-        setSettings(settingsData)
-      }
-
-      // Load branding settings
-      const brandingResponse = await fetch("/api/admin/branding")
-      if (brandingResponse.ok) {
-        const brandingData = await brandingResponse.json()
-        setBrandingSettings(brandingData)
-      }
-    } catch (error) {
-      console.error("Failed to load data:", error)
-    }
+    await loadData(true)
   }
 
   const handleSaveSettings = async () => {
@@ -294,7 +334,7 @@ export default function AdminPage() {
       if (response.ok) {
         setIsItemDialogOpen(false)
         resetItemForm()
-        loadData()
+        loadData(false) // Refresh data after item change
         alert(isEditingItem ? "Item updated successfully!" : "Item created successfully!")
       } else {
         alert("Failed to save item")
@@ -319,7 +359,7 @@ export default function AdminPage() {
       })
 
       if (response.ok) {
-        loadData()
+        loadData(false) // Refresh data after deletion
         alert("Item deleted successfully!")
       } else {
         alert("Failed to delete item")
@@ -339,7 +379,7 @@ export default function AdminPage() {
       })
 
       if (response.ok) {
-        loadData()
+        loadData(false) // Refresh data after deletion
         alert("Customer deleted successfully!")
       } else {
         const errorData = await response.json()
@@ -377,7 +417,7 @@ export default function AdminPage() {
 
       if (response.ok) {
         setSelectedCustomers([])
-        loadData()
+        loadData(false) // Refresh data after deletion
         alert(`${selectedCustomers.length} customers deleted successfully!`)
       } else {
         const errorData = await response.json()
@@ -423,7 +463,7 @@ export default function AdminPage() {
 
       if (response.ok) {
         setSelectedCustomers([])
-        loadData()
+        loadData(false) // Refresh data after deletion
         alert("All customers deleted successfully!")
       } else {
         const errorData = await response.json()
@@ -546,7 +586,9 @@ export default function AdminPage() {
         <div className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-            <p className="text-gray-600">Manage your loyalty card system</p>
+            <p className="text-gray-600">
+              Manage your loyalty card system • Last updated: {lastUpdate.toLocaleTimeString()}
+            </p>
           </div>
           <div className="flex items-center space-x-4">
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
@@ -581,7 +623,7 @@ export default function AdminPage() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
@@ -589,6 +631,16 @@ export default function AdminPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.totalCustomers}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {analytics?.customerGrowth && analytics.customerGrowth.length > 1 && (
+                      <span className="text-green-600">
+                        +
+                        {analytics.customerGrowth[analytics.customerGrowth.length - 1].count -
+                          analytics.customerGrowth[analytics.customerGrowth.length - 2].count}{" "}
+                        this week
+                      </span>
+                    )}
+                  </p>
                 </CardContent>
               </Card>
 
@@ -599,19 +651,66 @@ export default function AdminPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{items.filter((item) => item.is_active).length}</div>
+                  <p className="text-xs text-muted-foreground">{items.length} total items</p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Rewards Redeemed</CardTitle>
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                  <Award className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.totalRewards}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {analytics?.averagePointsPerCustomer && (
+                      <span>{analytics.averagePointsPerCustomer.toFixed(1)} avg points/customer</span>
+                    )}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{analytics?.totalTransactions || 0}</div>
+                  <p className="text-xs text-muted-foreground">All-time transactions</p>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Recent Activity */}
+            {analytics?.recentTransactions && analytics.recentTransactions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Recent Activity</CardTitle>
+                  <CardDescription>Latest customer transactions</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {analytics.recentTransactions.slice(0, 5).map((transaction) => (
+                      <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <p className="font-medium">{transaction.customer_name}</p>
+                          <p className="text-sm text-gray-600">
+                            {transaction.item_name} • +{transaction.points_added} points
+                            {transaction.reward_earned && (
+                              <span className="text-green-600 ml-2">🎉 Reward earned!</span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-500">{new Date(transaction.created_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="customers" className="space-y-6">
@@ -621,7 +720,7 @@ export default function AdminPage() {
                   <div>
                     <CardTitle>Customer Management</CardTitle>
                     <CardDescription>
-                      All registered customers and their points (Auto-refreshes every 30 seconds)
+                      All registered customers and their points (Updates every 10 seconds)
                     </CardDescription>
                   </div>
                   <div className="flex space-x-2">
@@ -1010,18 +1109,95 @@ export default function AdminPage() {
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Analytics</CardTitle>
-                <CardDescription>Loyalty program performance metrics</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Top Items */}
+              {analytics?.topItems && analytics.topItems.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5" />
+                      Top Items
+                    </CardTitle>
+                    <CardDescription>Most popular items by transaction count</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {analytics.topItems.slice(0, 5).map((item, index) => (
+                        <div key={item.name} className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-sm font-medium text-blue-600">
+                              {index + 1}
+                            </div>
+                            <span className="font-medium">{item.name}</span>
+                          </div>
+                          <span className="text-sm text-gray-600">{item.count} transactions</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Customer Growth */}
+              {analytics?.customerGrowth && analytics.customerGrowth.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calendar className="h-5 w-5" />
+                      Customer Growth
+                    </CardTitle>
+                    <CardDescription>New customers over time</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {analytics.customerGrowth.slice(-7).map((data) => (
+                        <div key={data.date} className="flex items-center justify-between">
+                          <span className="text-sm">{new Date(data.date).toLocaleDateString()}</span>
+                          <span className="font-medium">{data.count} customers</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Recent Transactions */}
+            {analytics?.recentTransactions && analytics.recentTransactions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Recent Transactions</CardTitle>
+                  <CardDescription>Latest customer activity</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {analytics.recentTransactions.slice(0, 10).map((transaction) => (
+                      <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <p className="font-medium">{transaction.customer_name}</p>
+                          <p className="text-sm text-gray-600">
+                            {transaction.item_name} • +{transaction.points_added} points
+                            {transaction.reward_earned && <span className="text-green-600 ml-2">🎉 Reward!</span>}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-500">{new Date(transaction.created_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {!analytics && (
+              <Card>
+                <CardContent className="text-center py-8">
                   <BarChart3 className="mx-auto h-12 w-12 text-gray-400" />
-                  <p className="mt-4 text-gray-500">Analytics dashboard coming soon...</p>
-                </div>
-              </CardContent>
-            </Card>
+                  <p className="mt-4 text-gray-500">Loading analytics...</p>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
         </Tabs>
       </div>
