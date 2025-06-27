@@ -55,9 +55,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
         {
           video: {
             facingMode: { ideal: "environment" },
-            width: { ideal: 1920, min: 640 },
-            height: { ideal: 1080, min: 480 },
-            frameRate: { ideal: 60, min: 30 },
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 },
+            frameRate: { ideal: 30 },
           },
         },
         // Standard back camera
@@ -109,12 +109,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
         // Wait for video metadata to load
         videoRef.current.onloadedmetadata = () => {
           if (videoRef.current) {
+            console.log("Video loaded:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight)
             const playPromise = videoRef.current.play()
 
             if (playPromise !== undefined) {
               playPromise
                 .then(() => {
-                  console.log("Video started playing")
+                  console.log("Video started playing successfully")
                   setIsScanning(true)
                   startScanningLoop()
                 })
@@ -164,13 +165,26 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   }
 
   const startScanningLoop = () => {
+    let frameCount = 0
+
     const scanFrame = () => {
+      if (!isScanning) return
+
+      frameCount++
+
+      // Scan every frame for maximum responsiveness
+      scanQRCode()
+
+      // Continue the loop
+      animationFrameRef.current = requestAnimationFrame(scanFrame)
+    }
+
+    // Start scanning after a brief delay to ensure video is ready
+    setTimeout(() => {
       if (isScanning) {
-        scanQRCode()
         animationFrameRef.current = requestAnimationFrame(scanFrame)
       }
-    }
-    animationFrameRef.current = requestAnimationFrame(scanFrame)
+    }, 100)
   }
 
   const stopScanning = () => {
@@ -196,7 +210,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
     const video = videoRef.current
     const canvas = canvasRef.current
-    const context = canvas.getContext("2d", { willReadFrequently: true })
+    const context = canvas.getContext("2d")
 
     if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) {
       return
@@ -210,30 +224,56 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
       canvas.width = videoWidth
       canvas.height = videoHeight
 
-      // Draw video frame to canvas
+      // Clear canvas and draw video frame
+      context.clearRect(0, 0, videoWidth, videoHeight)
       context.drawImage(video, 0, 0, videoWidth, videoHeight)
 
       // Get image data for QR code detection
       const imageData = context.getImageData(0, 0, videoWidth, videoHeight)
 
-      // Detect QR code using jsQR with optimized options
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      // Try multiple detection strategies for better success rate
+      let code = null
+
+      // Strategy 1: Standard detection with both inversions
+      code = jsQR(imageData.data, imageData.width, imageData.height, {
         inversionAttempts: "attemptBoth",
       })
 
+      // Strategy 2: If no code found, try with center region only
+      if (!code && videoWidth > 200 && videoHeight > 200) {
+        const centerSize = Math.min(videoWidth, videoHeight) * 0.7
+        const centerX = (videoWidth - centerSize) / 2
+        const centerY = (videoHeight - centerSize) / 2
+
+        const centerImageData = context.getImageData(centerX, centerY, centerSize, centerSize)
+        code = jsQR(centerImageData.data, centerImageData.width, centerImageData.height, {
+          inversionAttempts: "attemptBoth",
+        })
+      }
+
       if (code && code.data && code.data.trim()) {
         const now = Date.now()
-        // Prevent duplicate scans within 0.5 seconds
-        if (now - lastScanTime > 500) {
+        // Prevent duplicate scans within 1 second
+        if (now - lastScanTime > 1000) {
           console.log("QR Code detected:", code.data)
           setLastScanTime(now)
-          setScanSuccess(`Successfully scanned: ${code.data}`)
+          setScanSuccess(`Scanned: ${code.data}`)
           onScan(code.data.trim())
+
+          // Brief visual feedback
+          if (videoRef.current) {
+            videoRef.current.style.borderColor = "#10b981"
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.style.borderColor = ""
+              }
+            }, 1000)
+          }
 
           // Stop scanning after successful detection
           setTimeout(() => {
             stopScanning()
-          }, 1500)
+          }, 2000)
         }
       }
     } catch (err) {
