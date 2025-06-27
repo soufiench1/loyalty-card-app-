@@ -21,7 +21,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Auto-start scanning when component becomes active
   useEffect(() => {
@@ -165,34 +165,22 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   }
 
   const startScanningLoop = () => {
-    let frameCount = 0
-
-    const scanFrame = () => {
-      if (!isScanning) return
-
-      frameCount++
-
-      // Scan every frame for maximum responsiveness
-      scanQRCode()
-
-      // Continue the loop
-      animationFrameRef.current = requestAnimationFrame(scanFrame)
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current)
     }
 
-    // Start scanning after a brief delay to ensure video is ready
-    setTimeout(() => {
-      if (isScanning) {
-        animationFrameRef.current = requestAnimationFrame(scanFrame)
-      }
-    }, 100)
+    // Use faster interval for better detection
+    scanIntervalRef.current = setInterval(() => {
+      scanQRCode()
+    }, 100) // Scan every 100ms for rapid detection
   }
 
   const stopScanning = () => {
     setIsScanning(false)
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current)
+      scanIntervalRef.current = null
     }
 
     if (streamRef.current) {
@@ -241,7 +229,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
       // Strategy 2: If no code found, try with center region only
       if (!code && videoWidth > 200 && videoHeight > 200) {
-        const centerSize = Math.min(videoWidth, videoHeight) * 0.7
+        const centerSize = Math.min(videoWidth, videoHeight) * 0.6
         const centerX = (videoWidth - centerSize) / 2
         const centerY = (videoHeight - centerSize) / 2
 
@@ -253,9 +241,9 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
       if (code && code.data && code.data.trim()) {
         const now = Date.now()
-        // Prevent duplicate scans within 1 second
-        if (now - lastScanTime > 1000) {
-          console.log("QR Code detected:", code.data)
+        // Prevent duplicate scans within 2 seconds
+        if (now - lastScanTime > 2000) {
+          console.log("✅ QR Code detected:", code.data)
           setLastScanTime(now)
           setScanSuccess(`Scanned: ${code.data}`)
           onScan(code.data.trim())
@@ -263,9 +251,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
           // Brief visual feedback
           if (videoRef.current) {
             videoRef.current.style.borderColor = "#10b981"
+            videoRef.current.style.boxShadow = "0 0 10px rgba(16, 185, 129, 0.5)"
             setTimeout(() => {
               if (videoRef.current) {
                 videoRef.current.style.borderColor = ""
+                videoRef.current.style.boxShadow = ""
               }
             }, 1000)
           }
@@ -273,7 +263,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
           // Stop scanning after successful detection
           setTimeout(() => {
             stopScanning()
-          }, 2000)
+          }, 1500)
         }
       }
     } catch (err) {
@@ -302,7 +292,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
             {/* Video element */}
             <video
               ref={videoRef}
-              className={`w-full max-w-md mx-auto rounded-lg border-2 ${
+              className={`w-full max-w-md mx-auto rounded-lg border-2 transition-all duration-300 ${
                 isScanning ? "border-green-500 block" : "border-gray-300 hidden"
               }`}
               playsInline
