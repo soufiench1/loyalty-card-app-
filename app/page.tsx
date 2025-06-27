@@ -216,14 +216,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Only show admin access at bottom for staff */}
-        <div className="text-center">
-          <Button variant="ghost" size="sm" asChild>
-            <a href="/admin" className="text-xs text-gray-500">
-              Staff Access
-            </a>
-          </Button>
-        </div>
+        
       </div>
     </div>
   )

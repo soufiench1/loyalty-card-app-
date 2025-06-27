@@ -170,25 +170,35 @@ export default function AdminPage() {
     setSyncError("")
 
     try {
-      // Add timeout to requests for better error handling
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), 10000))
+      // Add timeout and no-cache headers for production
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), 8000))
 
-      // Load all data in parallel with timeout
+      const fetchOptions = {
+        cache: "no-store" as RequestCache,
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      }
+
+      // Load all data in parallel with timeout and no-cache
       const dataPromises = [
-        Promise.race([fetch("/api/admin/customers"), timeoutPromise]),
-        Promise.race([fetch("/api/items"), timeoutPromise]),
-        Promise.race([fetch("/api/admin/stats"), timeoutPromise]),
-        Promise.race([fetch("/api/admin/settings"), timeoutPromise]),
-        Promise.race([fetch("/api/admin/branding"), timeoutPromise]),
-        Promise.race([fetch("/api/admin/analytics"), timeoutPromise]),
+        Promise.race([fetch("/api/admin/customers", fetchOptions), timeoutPromise]),
+        Promise.race([fetch("/api/items", fetchOptions), timeoutPromise]),
+        Promise.race([fetch("/api/admin/stats", fetchOptions), timeoutPromise]),
+        Promise.race([fetch("/api/admin/settings", fetchOptions), timeoutPromise]),
+        Promise.race([fetch("/api/admin/branding", fetchOptions), timeoutPromise]),
+        Promise.race([fetch("/api/admin/analytics", fetchOptions), timeoutPromise]),
       ]
 
       const [customersRes, itemsRes, statsRes, settingsRes, brandingRes, analyticsRes] = await Promise.all(dataPromises)
 
-      // Process customers
+      // Process customers with immediate state update
       if (customersRes instanceof Response && customersRes.ok) {
         const customersData = await customersRes.json()
         setCustomers(customersData)
+        console.log("✅ Customers updated:", customersData.length)
       } else {
         console.error("Failed to load customers")
       }
@@ -242,6 +252,30 @@ export default function AdminPage() {
     }
   }, [])
 
+  // Add a force refresh function for production
+  const forceRefresh = useCallback(async () => {
+    try {
+      // Call the force refresh endpoint
+      await fetch("/api/admin/force-refresh", {
+        method: "POST",
+        headers: {
+          "Cache-Control": "no-cache",
+        },
+      })
+
+      // Then immediately refresh data
+      await loadData(false)
+      console.log("🔄 Force refresh completed")
+    } catch (error) {
+      console.error("Force refresh failed:", error)
+    }
+  }, [loadData])
+
+  // Update the refresh button to use force refresh
+  const handleRefresh = async () => {
+    await forceRefresh()
+  }
+
   // Check session on mount
   useEffect(() => {
     if (isAdminSessionValid()) {
@@ -250,24 +284,32 @@ export default function AdminPage() {
     }
   }, [loadData])
 
-  // More aggressive real-time sync for Vercel - every 5 seconds
+  // Update the real-time sync intervals for production
+  // Change the general data refresh from 2 seconds to 1 second for production
   useEffect(() => {
     if (!isAuthenticated || !isOnline) return
 
     const interval = setInterval(() => {
-      loadData(false) // Silent refresh every 2 seconds
-    }, 2000)
+      loadData(false) // Silent refresh every 1 second for production
+    }, 1000)
 
     return () => clearInterval(interval)
   }, [isAuthenticated, isOnline, loadData])
 
-  // Extra aggressive customer list sync - every 1 second when on customers tab
+  // Make customer list sync even more aggressive - every 500ms for production
   useEffect(() => {
     if (!isAuthenticated || !isOnline) return
 
     const customerInterval = setInterval(async () => {
       try {
-        const response = await fetch("/api/admin/customers")
+        const response = await fetch("/api/admin/customers", {
+          cache: "no-store", // Prevent caching
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
+        })
         if (response.ok) {
           const customersData = await response.json()
           setCustomers(customersData)
@@ -275,10 +317,22 @@ export default function AdminPage() {
       } catch (error) {
         console.log("Customer sync error:", error)
       }
-    }, 1000) // Every 1 second for customer list
+    }, 500) // Every 500ms for customer list in production
 
     return () => clearInterval(customerInterval)
   }, [isAuthenticated, isOnline])
+
+  // Add automatic force refresh every 10 seconds in production
+  useEffect(() => {
+    if (!isAuthenticated || !isOnline) return
+
+    // Force refresh every 10 seconds to combat serverless cold starts
+    const forceRefreshInterval = setInterval(() => {
+      forceRefresh()
+    }, 10000)
+
+    return () => clearInterval(forceRefreshInterval)
+  }, [isAuthenticated, isOnline, forceRefresh])
 
   // Update remaining time every second
   useEffect(() => {
@@ -330,10 +384,6 @@ export default function AdminPage() {
     setUsername("")
     setPassword("")
     setLoginError("")
-  }
-
-  const handleRefresh = async () => {
-    await loadData(true)
   }
 
   const handleSaveSettings = async () => {
