@@ -90,8 +90,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
         if (barcodes.length > 0) {
           const now = Date.now()
-          if (now - lastScanTime.current > 1000) {
-            // 1 second debounce
+          if (now - lastScanTime.current > 500) {
+            // Faster response
             console.log("✅ QR detected via BarcodeDetector:", barcodes[0].rawValue)
             lastScanTime.current = now
             setScanSuccess(`Scanned: ${barcodes[0].rawValue}`)
@@ -132,8 +132,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
           if (code && code.data) {
             const now = Date.now()
-            if (now - lastScanTime.current > 1000) {
-              // 1 second debounce
+            if (now - lastScanTime.current > 500) {
+              // Faster response
               console.log("✅ QR detected via jsQR:", code.data)
               lastScanTime.current = now
               setScanSuccess(`Scanned: ${code.data}`)
@@ -203,23 +203,27 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
           <div className="relative">
             <video
               ref={videoRef}
-              className={`w-full max-w-md mx-auto rounded-lg border-2 transition-all duration-300 ${
+              className={`w-full max-w-sm mx-auto rounded-lg border-2 transition-all duration-300 ${
                 isScanning ? "border-green-500 block" : "border-gray-300 hidden"
               }`}
               playsInline
               muted
               autoPlay
-              style={{ maxHeight: "400px" }}
+              style={{
+                maxHeight: "300px",
+                width: "100%",
+                objectFit: "cover",
+              }}
             />
 
             {isScanning && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="relative w-48 h-48 border-2 border-green-500 rounded-lg">
+                <div className="relative w-40 h-40 sm:w-48 sm:h-48 border-2 border-green-500 rounded-lg">
                   {/* Corner indicators */}
-                  <div className="absolute -top-1 -left-1 w-6 h-6 border-l-4 border-t-4 border-green-400"></div>
-                  <div className="absolute -top-1 -right-1 w-6 h-6 border-r-4 border-t-4 border-green-400"></div>
-                  <div className="absolute -bottom-1 -left-1 w-6 h-6 border-l-4 border-b-4 border-green-400"></div>
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 border-r-4 border-b-4 border-green-400"></div>
+                  <div className="absolute -top-1 -left-1 w-4 h-4 sm:w-6 sm:h-6 border-l-4 border-t-4 border-green-400"></div>
+                  <div className="absolute -top-1 -right-1 w-4 h-4 sm:w-6 sm:h-6 border-r-4 border-t-4 border-green-400"></div>
+                  <div className="absolute -bottom-1 -left-1 w-4 h-4 sm:w-6 sm:h-6 border-l-4 border-b-4 border-green-400"></div>
+                  <div className="absolute -bottom-1 -right-1 w-4 h-4 sm:w-6 sm:h-6 border-r-4 border-b-4 border-green-400"></div>
 
                   {/* Scanning line */}
                   <div className="absolute inset-x-0 top-1/2 h-0.5 bg-green-400 animate-pulse"></div>

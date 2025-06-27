@@ -255,11 +255,30 @@ export default function AdminPage() {
     if (!isAuthenticated || !isOnline) return
 
     const interval = setInterval(() => {
-      loadData(false) // Silent refresh every 5 seconds
-    }, 5000)
+      loadData(false) // Silent refresh every 2 seconds
+    }, 2000)
 
     return () => clearInterval(interval)
   }, [isAuthenticated, isOnline, loadData])
+
+  // Extra aggressive customer list sync - every 1 second when on customers tab
+  useEffect(() => {
+    if (!isAuthenticated || !isOnline) return
+
+    const customerInterval = setInterval(async () => {
+      try {
+        const response = await fetch("/api/admin/customers")
+        if (response.ok) {
+          const customersData = await response.json()
+          setCustomers(customersData)
+        }
+      } catch (error) {
+        console.log("Customer sync error:", error)
+      }
+    }, 1000) // Every 1 second for customer list
+
+    return () => clearInterval(customerInterval)
+  }, [isAuthenticated, isOnline])
 
   // Update remaining time every second
   useEffect(() => {
@@ -632,56 +651,80 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="min-h-screen bg-gray-50 p-2 sm:p-4">
       <div className="max-w-6xl mx-auto">
-        <div className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-            <div className="flex items-center gap-4 mt-2">
-              <p className="text-gray-600">Last updated: {lastUpdate.toLocaleTimeString()}</p>
-              <div className="flex items-center gap-2">
-                {isOnline ? <Wifi className="h-4 w-4 text-green-600" /> : <WifiOff className="h-4 w-4 text-red-600" />}
-                <span className={`text-xs ${isOnline ? "text-green-600" : "text-red-600"}`}>
-                  {isOnline ? "Online" : "Offline"}
-                </span>
+        <div className="mb-6 sm:mb-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Admin Dashboard</h1>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mt-2">
+                <p className="text-gray-600 text-sm">Last updated: {lastUpdate.toLocaleTimeString()}</p>
+                <div className="flex items-center gap-2">
+                  {isOnline ? (
+                    <Wifi className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <WifiOff className="h-4 w-4 text-red-600" />
+                  )}
+                  <span className={`text-xs ${isOnline ? "text-green-600" : "text-red-600"}`}>
+                    {isOnline ? "Online" : "Offline"}
+                  </span>
+                </div>
+                {syncError && <p className="text-xs text-red-600">{syncError}</p>}
               </div>
-              {syncError && <p className="text-xs text-red-600">{syncError}</p>}
             </div>
-          </div>
-          <div className="flex items-center space-x-4">
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <div className="flex items-center space-x-2 text-sm text-gray-600">
-              <Clock className="h-4 w-4" />
-              <span>Session: {formatRemainingTime(remainingTime)}</span>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="w-full sm:w-auto bg-transparent"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+              <div className="flex items-center justify-center sm:justify-start space-x-2 text-sm text-gray-600">
+                <Clock className="h-4 w-4" />
+                <span>Session: {formatRemainingTime(remainingTime)}</span>
+              </div>
+              <Button asChild className="w-full sm:w-auto">
+                <a href="/scan">
+                  <QrCode className="mr-2 h-4 w-4" />
+                  Scan QR Code
+                </a>
+              </Button>
+              <Button variant="outline" onClick={handleLogout} className="w-full sm:w-auto bg-transparent">
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
             </div>
-            <Button asChild>
-              <a href="/scan">
-                <QrCode className="mr-2 h-4 w-4" />
-                Scan QR Code
-              </a>
-            </Button>
-            <Button variant="outline" onClick={handleLogout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Logout
-            </Button>
           </div>
         </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="customers">Customers</TabsTrigger>
-            <TabsTrigger value="items">Items</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
-            <TabsTrigger value="branding">Branding</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1">
+            <TabsTrigger value="overview" className="text-xs sm:text-sm">
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="customers" className="text-xs sm:text-sm">
+              Customers
+            </TabsTrigger>
+            <TabsTrigger value="items" className="text-xs sm:text-sm">
+              Items
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="text-xs sm:text-sm">
+              Settings
+            </TabsTrigger>
+            <TabsTrigger value="branding" className="text-xs sm:text-sm">
+              Branding
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="text-xs sm:text-sm">
+              Analytics
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
@@ -847,24 +890,27 @@ export default function AdminPage() {
 
                       {/* Customer List */}
                       {customers.map((customer) => (
-                        <div key={customer.id} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div
+                          key={customer.id}
+                          className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-lg space-y-2 sm:space-y-0"
+                        >
                           <div className="flex items-center space-x-3">
                             <Checkbox
                               checked={selectedCustomers.includes(customer.id)}
                               onCheckedChange={(checked) => handleSelectCustomer(customer.id, checked as boolean)}
                             />
-                            <div>
-                              <h3 className="font-medium">{customer.name}</h3>
-                              <p className="text-sm text-gray-500">ID: {customer.id}</p>
+                            <div className="flex-1">
+                              <h3 className="font-medium text-sm sm:text-base">{customer.name}</h3>
+                              <p className="text-xs sm:text-sm text-gray-500">ID: {customer.id}</p>
                               <p className="text-xs text-gray-400">
                                 Joined: {new Date(customer.created_at).toLocaleDateString()}
                               </p>
                             </div>
                           </div>
-                          <div className="flex items-center space-x-4">
-                            <div className="text-right">
-                              <p className="font-medium">{customer.points} points</p>
-                              <p className="text-sm text-gray-500">{customer.rewards} rewards</p>
+                          <div className="flex items-center justify-between sm:justify-end space-x-4">
+                            <div className="text-left sm:text-right">
+                              <p className="font-medium text-sm">{customer.points} points</p>
+                              <p className="text-xs sm:text-sm text-gray-500">{customer.rewards} rewards</p>
                             </div>
                             <Button
                               variant="destructive"
