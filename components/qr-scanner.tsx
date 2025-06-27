@@ -18,31 +18,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [lastScanTime, setLastScanTime] = useState<number>(0)
   const [scanSuccess, setScanSuccess] = useState<string>("")
-  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([])
-  const [currentDeviceIndex, setCurrentDeviceIndex] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Get available camera devices
-  const getCameraDevices = async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const videoDevices = devices.filter((device) => device.kind === "videoinput")
-      setCameraDevices(videoDevices)
-      console.log("Available cameras:", videoDevices.length)
-    } catch (error) {
-      console.error("Error getting camera devices:", error)
-    }
-  }
+  const animationFrameRef = useRef<number | null>(null)
 
   // Auto-start scanning when component becomes active
   useEffect(() => {
     if (isActive && !isScanning) {
-      getCameraDevices().then(() => {
-        startScanning()
-      })
+      startScanning()
     } else if (!isActive && isScanning) {
       stopScanning()
     }
@@ -65,39 +49,33 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
         streamRef.current.getTracks().forEach((track) => track.stop())
       }
 
-      // Check if we have camera devices
-      if (cameraDevices.length === 0) {
-        await getCameraDevices()
-      }
-
       // Try different camera constraints in order of preference
       const constraintOptions = [
-        // First try: Back camera with high quality
+        // High quality back camera
         {
           video: {
-            deviceId: cameraDevices[currentDeviceIndex]?.deviceId,
             facingMode: { ideal: "environment" },
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 480 },
-            frameRate: { ideal: 30, min: 15 },
+            width: { ideal: 1920, min: 640 },
+            height: { ideal: 1080, min: 480 },
+            frameRate: { ideal: 60, min: 30 },
           },
         },
-        // Second try: Any back camera
+        // Standard back camera
         {
           video: {
-            facingMode: { ideal: "environment" },
+            facingMode: "environment",
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
         },
-        // Third try: Any camera with basic constraints
+        // Any camera fallback
         {
           video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         },
-        // Last resort: Any camera
+        // Basic fallback
         {
           video: true,
         },
@@ -173,12 +151,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
             setError("Camera is being used by another application. Please close other apps using the camera.")
             break
           case "OverconstrainedError":
-            setError("Camera constraints not supported. Trying with different settings...")
-            // Try with next camera device if available
-            if (currentDeviceIndex < cameraDevices.length - 1) {
-              setCurrentDeviceIndex(currentDeviceIndex + 1)
-              setTimeout(() => startScanning(), 1000)
-            }
+            setError("Camera constraints not supported. Trying with basic settings...")
             break
           case "SecurityError":
             setError("Camera access blocked by security policy. Please use HTTPS or localhost.")
@@ -191,21 +164,21 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   }
 
   const startScanningLoop = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current)
+    const scanFrame = () => {
+      if (isScanning) {
+        scanQRCode()
+        animationFrameRef.current = requestAnimationFrame(scanFrame)
+      }
     }
-
-    scanIntervalRef.current = setInterval(() => {
-      scanQRCode()
-    }, 150) // Scan every 150ms for better performance
+    animationFrameRef.current = requestAnimationFrame(scanFrame)
   }
 
   const stopScanning = () => {
     setIsScanning(false)
 
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current)
-      scanIntervalRef.current = null
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
     }
 
     if (streamRef.current) {
@@ -223,7 +196,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
     const video = videoRef.current
     const canvas = canvasRef.current
-    const context = canvas.getContext("2d")
+    const context = canvas.getContext("2d", { willReadFrequently: true })
 
     if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) {
       return
@@ -245,13 +218,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
       // Detect QR code using jsQR with optimized options
       const code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: "dontInvert",
+        inversionAttempts: "attemptBoth",
       })
 
       if (code && code.data && code.data.trim()) {
         const now = Date.now()
-        // Prevent duplicate scans within 2 seconds
-        if (now - lastScanTime > 2000) {
+        // Prevent duplicate scans within 0.5 seconds
+        if (now - lastScanTime > 500) {
           console.log("QR Code detected:", code.data)
           setLastScanTime(now)
           setScanSuccess(`Successfully scanned: ${code.data}`)
@@ -276,31 +249,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
     }
   }
 
-  const switchCamera = () => {
-    if (cameraDevices.length > 1) {
-      const nextIndex = (currentDeviceIndex + 1) % cameraDevices.length
-      setCurrentDeviceIndex(nextIndex)
-      if (isScanning) {
-        stopScanning()
-        setTimeout(() => startScanning(), 500)
-      }
-    }
-  }
-
   return (
     <Card>
       <CardContent className="p-6">
         <div className="space-y-4">
           <div className="text-center">
             <h3 className="text-lg font-semibold">QR Code Scanner</h3>
-            <p className="text-sm text-gray-600">
-              {isScanning ? "Point camera at QR code - scanning..." : "Click start to begin scanning"}
-            </p>
-            {cameraDevices.length > 1 && (
-              <p className="text-xs text-gray-500">
-                Camera {currentDeviceIndex + 1} of {cameraDevices.length}
-              </p>
-            )}
+            <p className="text-sm text-gray-600">{isScanning ? "Scanning..." : "Click start to scan"}</p>
           </div>
 
           <div className="relative">
@@ -331,9 +286,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
 
                   {/* Center text */}
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-                      Align QR code here
-                    </div>
+                    <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">Scan QR code</div>
                   </div>
                 </div>
               </div>
@@ -391,26 +344,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
               )}
             </Button>
 
-            {cameraDevices.length > 1 && (
-              <Button onClick={switchCamera} variant="outline" className="flex items-center gap-2">
-                <RotateCcw className="h-4 w-4" />
-                Switch Camera
-              </Button>
-            )}
-
             {error && hasPermission === false && (
-              <Button onClick={startScanning} variant="outline" className="flex items-center gap-2">
+              <Button onClick={startScanning} variant="outline" className="flex items-center gap-2 bg-transparent">
                 <RotateCcw className="h-4 w-4" />
                 Retry
               </Button>
             )}
-          </div>
-
-          <div className="text-xs text-gray-500 text-center space-y-1">
-            <p>• Make sure the QR code is clearly visible and well-lit</p>
-            <p>• Hold steady for 2-3 seconds</p>
-            <p>• Try different angles if scanning fails</p>
-            <p>• Use HTTPS or localhost for camera access</p>
           </div>
         </div>
       </CardContent>
