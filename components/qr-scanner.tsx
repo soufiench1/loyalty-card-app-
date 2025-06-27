@@ -1,11 +1,11 @@
 "use client"
 
 import type React from "react"
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect } from "react"
 import jsQR from "jsqr"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Camera, CameraOff, RotateCcw, CheckCircle, AlertCircle } from "lucide-react"
+import { Camera, CameraOff, CheckCircle, AlertCircle } from "lucide-react"
 
 interface QRScannerProps {
   onScan: (result: string) => void
@@ -15,15 +15,13 @@ interface QRScannerProps {
 const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
   const [isScanning, setIsScanning] = useState(false)
   const [error, setError] = useState<string>("")
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
-  const [lastScanTime, setLastScanTime] = useState<number>(0)
   const [scanSuccess, setScanSuccess] = useState<string>("")
+  const [detectionMethod, setDetectionMethod] = useState<string>("")
   const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const scanningRef = useRef<boolean>(false)
+  const lastScanTime = useRef<number>(0)
 
-  // Auto-start scanning when component becomes active
   useEffect(() => {
     if (isActive && !isScanning) {
       startScanning()
@@ -32,11 +30,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
     }
   }, [isActive])
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      stopScanning()
-    }
+    return () => stopScanning()
   }, [])
 
   const startScanning = async () => {
@@ -44,144 +39,138 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
       setError("")
       setScanSuccess("")
 
-      // Stop any existing stream first
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop())
-      }
+      // Check what detection methods are available
+      const hasBarcodeDetector = "BarcodeDetector" in window
+      setDetectionMethod(hasBarcodeDetector ? "Native BarcodeDetector" : "jsQR Library")
+      console.log("Detection method:", hasBarcodeDetector ? "BarcodeDetector" : "jsQR")
 
-      // Try different camera constraints in order of preference
-      const constraintOptions = [
-        // High quality back camera
-        {
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 480 },
-            frameRate: { ideal: 30 },
-          },
+      // Get camera stream with better constraints
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
         },
-        // Standard back camera
-        {
-          video: {
-            facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
-        // Any camera fallback
-        {
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
-        // Basic fallback
-        {
-          video: true,
-        },
-      ]
-
-      let stream: MediaStream | null = null
-      let lastError: Error | null = null
-
-      for (const constraints of constraintOptions) {
-        try {
-          console.log("Trying camera constraints:", constraints)
-          stream = await navigator.mediaDevices.getUserMedia(constraints)
-          break
-        } catch (err) {
-          console.log("Camera constraint failed:", err)
-          lastError = err as Error
-          continue
-        }
-      }
-
-      if (!stream) {
-        throw lastError || new Error("No camera access available")
-      }
+      })
 
       streamRef.current = stream
-      setHasPermission(true)
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
 
-        // Wait for video metadata to load
+        // Wait for video to be ready
         videoRef.current.onloadedmetadata = () => {
           if (videoRef.current) {
-            console.log("Video loaded:", videoRef.current.videoWidth, "x", videoRef.current.videoHeight)
-            const playPromise = videoRef.current.play()
-
-            if (playPromise !== undefined) {
-              playPromise
-                .then(() => {
-                  console.log("Video started playing successfully")
-                  setIsScanning(true)
-                  startScanningLoop()
-                })
-                .catch((error) => {
-                  console.error("Error playing video:", error)
-                  setError("Failed to start video playback. Try refreshing the page.")
-                })
-            }
+            videoRef.current.play().then(() => {
+              console.log("Video started, beginning scan loop")
+              setIsScanning(true)
+              scanningRef.current = true
+              scanLoop()
+            })
           }
-        }
-
-        // Handle video errors
-        videoRef.current.onerror = (e) => {
-          console.error("Video error:", e)
-          setError("Video playback error. Please try again.")
         }
       }
     } catch (err) {
-      console.error("Error accessing camera:", err)
-      setHasPermission(false)
-      setIsScanning(false)
-
-      if (err instanceof Error) {
-        switch (err.name) {
-          case "NotAllowedError":
-            setError(
-              "Camera permission denied. Please allow camera access in your browser settings and refresh the page.",
-            )
-            break
-          case "NotFoundError":
-            setError("No camera found on this device. Please ensure you have a working camera.")
-            break
-          case "NotReadableError":
-            setError("Camera is being used by another application. Please close other apps using the camera.")
-            break
-          case "OverconstrainedError":
-            setError("Camera constraints not supported. Trying with basic settings...")
-            break
-          case "SecurityError":
-            setError("Camera access blocked by security policy. Please use HTTPS or localhost.")
-            break
-          default:
-            setError(`Camera error: ${err.message}. Please try refreshing the page.`)
-        }
-      }
+      console.error("Camera error:", err)
+      setError("Camera access denied or not available. Please allow camera access.")
     }
   }
 
-  const startScanningLoop = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current)
+  const scanLoop = async () => {
+    if (!scanningRef.current || !videoRef.current) return
+
+    try {
+      // Method 1: Try BarcodeDetector API first (fastest and most reliable)
+      if ("BarcodeDetector" in window) {
+        const detector = new (window as any).BarcodeDetector({
+          formats: ["qr_code"],
+        })
+
+        const barcodes = await detector.detect(videoRef.current)
+
+        if (barcodes.length > 0) {
+          const now = Date.now()
+          if (now - lastScanTime.current > 1000) {
+            // 1 second debounce
+            console.log("✅ QR detected via BarcodeDetector:", barcodes[0].rawValue)
+            lastScanTime.current = now
+            setScanSuccess(`Scanned: ${barcodes[0].rawValue}`)
+            onScan(barcodes[0].rawValue)
+
+            // Visual feedback
+            if (videoRef.current) {
+              videoRef.current.style.borderColor = "#10b981"
+              videoRef.current.style.boxShadow = "0 0 15px rgba(16, 185, 129, 0.6)"
+              setTimeout(() => {
+                if (videoRef.current) {
+                  videoRef.current.style.borderColor = ""
+                  videoRef.current.style.boxShadow = ""
+                }
+              }, 1000)
+            }
+
+            stopScanning()
+            return
+          }
+        }
+      }
+      // Method 2: Fallback to jsQR for unsupported browsers
+      else {
+        const canvas = document.createElement("canvas")
+        const context = canvas.getContext("2d")
+        const video = videoRef.current
+
+        if (context && video.videoWidth > 0 && video.videoHeight > 0) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          context.drawImage(video, 0, 0)
+
+          const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth",
+          })
+
+          if (code && code.data) {
+            const now = Date.now()
+            if (now - lastScanTime.current > 1000) {
+              // 1 second debounce
+              console.log("✅ QR detected via jsQR:", code.data)
+              lastScanTime.current = now
+              setScanSuccess(`Scanned: ${code.data}`)
+              onScan(code.data)
+
+              // Visual feedback
+              if (videoRef.current) {
+                videoRef.current.style.borderColor = "#10b981"
+                videoRef.current.style.boxShadow = "0 0 15px rgba(16, 185, 129, 0.6)"
+                setTimeout(() => {
+                  if (videoRef.current) {
+                    videoRef.current.style.borderColor = ""
+                    videoRef.current.style.boxShadow = ""
+                  }
+                }, 1000)
+              }
+
+              stopScanning()
+              return
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.log("Scan error:", err)
     }
 
-    // Use faster interval for better detection
-    scanIntervalRef.current = setInterval(() => {
-      scanQRCode()
-    }, 100) // Scan every 100ms for rapid detection
+    // Continue scanning at 60fps for maximum responsiveness
+    if (scanningRef.current) {
+      requestAnimationFrame(scanLoop)
+    }
   }
 
   const stopScanning = () => {
+    console.log("Stopping scanner")
     setIsScanning(false)
-
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current)
-      scanIntervalRef.current = null
-    }
+    scanningRef.current = false
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -192,84 +181,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
       videoRef.current.srcObject = null
     }
   }
-
-  const scanQRCode = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || !isScanning) return
-
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    const context = canvas.getContext("2d")
-
-    if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) {
-      return
-    }
-
-    try {
-      // Set canvas dimensions to match video
-      const { videoWidth, videoHeight } = video
-      if (videoWidth === 0 || videoHeight === 0) return
-
-      canvas.width = videoWidth
-      canvas.height = videoHeight
-
-      // Clear canvas and draw video frame
-      context.clearRect(0, 0, videoWidth, videoHeight)
-      context.drawImage(video, 0, 0, videoWidth, videoHeight)
-
-      // Get image data for QR code detection
-      const imageData = context.getImageData(0, 0, videoWidth, videoHeight)
-
-      // Try multiple detection strategies for better success rate
-      let code = null
-
-      // Strategy 1: Standard detection with both inversions
-      code = jsQR(imageData.data, imageData.width, imageData.height, {
-        inversionAttempts: "attemptBoth",
-      })
-
-      // Strategy 2: If no code found, try with center region only
-      if (!code && videoWidth > 200 && videoHeight > 200) {
-        const centerSize = Math.min(videoWidth, videoHeight) * 0.6
-        const centerX = (videoWidth - centerSize) / 2
-        const centerY = (videoHeight - centerSize) / 2
-
-        const centerImageData = context.getImageData(centerX, centerY, centerSize, centerSize)
-        code = jsQR(centerImageData.data, centerImageData.width, centerImageData.height, {
-          inversionAttempts: "attemptBoth",
-        })
-      }
-
-      if (code && code.data && code.data.trim()) {
-        const now = Date.now()
-        // Prevent duplicate scans within 2 seconds
-        if (now - lastScanTime > 2000) {
-          console.log("✅ QR Code detected:", code.data)
-          setLastScanTime(now)
-          setScanSuccess(`Scanned: ${code.data}`)
-          onScan(code.data.trim())
-
-          // Brief visual feedback
-          if (videoRef.current) {
-            videoRef.current.style.borderColor = "#10b981"
-            videoRef.current.style.boxShadow = "0 0 10px rgba(16, 185, 129, 0.5)"
-            setTimeout(() => {
-              if (videoRef.current) {
-                videoRef.current.style.borderColor = ""
-                videoRef.current.style.boxShadow = ""
-              }
-            }, 1000)
-          }
-
-          // Stop scanning after successful detection
-          setTimeout(() => {
-            stopScanning()
-          }, 1500)
-        }
-      }
-    } catch (err) {
-      console.error("Error scanning QR code:", err)
-    }
-  }, [isScanning, lastScanTime, onScan])
 
   const toggleScanning = () => {
     if (isScanning) {
@@ -284,12 +195,12 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
       <CardContent className="p-6">
         <div className="space-y-4">
           <div className="text-center">
-            <h3 className="text-lg font-semibold">QR Code Scanner</h3>
+            <h3 className="text-lg font-semibold">QR Scanner</h3>
             <p className="text-sm text-gray-600">{isScanning ? "Scanning..." : "Click start to scan"}</p>
+            {detectionMethod && <p className="text-xs text-blue-600">Using: {detectionMethod}</p>}
           </div>
 
           <div className="relative">
-            {/* Video element */}
             <video
               ref={videoRef}
               className={`w-full max-w-md mx-auto rounded-lg border-2 transition-all duration-300 ${
@@ -301,9 +212,8 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
               style={{ maxHeight: "400px" }}
             />
 
-            {/* Scanning overlay */}
             {isScanning && (
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="relative w-48 h-48 border-2 border-green-500 rounded-lg">
                   {/* Corner indicators */}
                   <div className="absolute -top-1 -left-1 w-6 h-6 border-l-4 border-t-4 border-green-400"></div>
@@ -321,9 +231,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
                 </div>
               </div>
             )}
-
-            {/* Hidden canvas for processing */}
-            <canvas ref={canvasRef} className="hidden" />
           </div>
 
           {/* Success message */}
@@ -338,24 +245,11 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-red-600" />
-              <div className="flex-1">
-                <p className="text-sm text-red-700">{error}</p>
-                {error.includes("permission") && (
-                  <div className="mt-2 text-xs text-red-600">
-                    <p>To fix this:</p>
-                    <ul className="list-disc list-inside mt-1">
-                      <li>Click the camera icon in your browser's address bar</li>
-                      <li>Select "Allow" for camera access</li>
-                      <li>Refresh the page</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
 
-          {/* Controls */}
-          <div className="flex justify-center space-x-2">
+          <div className="flex justify-center">
             <Button
               onClick={toggleScanning}
               variant={isScanning ? "destructive" : "default"}
@@ -373,13 +267,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onScan, isActive }) => {
                 </>
               )}
             </Button>
-
-            {error && hasPermission === false && (
-              <Button onClick={startScanning} variant="outline" className="flex items-center gap-2 bg-transparent">
-                <RotateCcw className="h-4 w-4" />
-                Retry
-              </Button>
-            )}
           </div>
         </div>
       </CardContent>
