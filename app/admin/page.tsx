@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
 import type React from "react"
+import { useRealtimeCustomers } from "@/hooks/use-realtime-customers"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -99,7 +100,13 @@ export default function AdminPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [loginError, setLoginError] = useState("")
-  const [customers, setCustomers] = useState<Customer[]>([])
+  const {
+    customers,
+    isLoading: customersLoading,
+    error: customersError,
+    lastUpdate: customersLastUpdate,
+    refetch: refetchCustomers,
+  } = useRealtimeCustomers()
   const [items, setItems] = useState<Item[]>([])
   const [stats, setStats] = useState({ totalCustomers: 0, totalPoints: 0, totalRewards: 0 })
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
@@ -170,9 +177,8 @@ export default function AdminPage() {
     setSyncError("")
 
     try {
-      // Add timeout and no-cache headers for production
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), 8000))
-
+      // Add timestamp to prevent caching
+      const timestamp = Date.now()
       const fetchOptions = {
         cache: "no-store" as RequestCache,
         headers: {
@@ -182,65 +188,43 @@ export default function AdminPage() {
         },
       }
 
-      // Load all data in parallel with timeout and no-cache
+      // Load all data in parallel with cache busting
       const dataPromises = [
-        Promise.race([fetch("/api/admin/customers", fetchOptions), timeoutPromise]),
-        Promise.race([fetch("/api/items", fetchOptions), timeoutPromise]),
-        Promise.race([fetch("/api/admin/stats", fetchOptions), timeoutPromise]),
-        Promise.race([fetch("/api/admin/settings", fetchOptions), timeoutPromise]),
-        Promise.race([fetch("/api/admin/branding", fetchOptions), timeoutPromise]),
-        Promise.race([fetch("/api/admin/analytics", fetchOptions), timeoutPromise]),
+        fetch(`/api/admin/stats?t=${timestamp}`, fetchOptions),
+        fetch(`/api/admin/settings?t=${timestamp}`, fetchOptions),
+        fetch(`/api/admin/branding?t=${timestamp}`, fetchOptions),
+        fetch(`/api/admin/analytics?t=${timestamp}`, fetchOptions),
+        fetch(`/api/items?t=${timestamp}`, fetchOptions),
       ]
 
-      const [customersRes, itemsRes, statsRes, settingsRes, brandingRes, analyticsRes] = await Promise.all(dataPromises)
+      const [statsRes, settingsRes, brandingRes, analyticsRes, itemsRes] = await Promise.all(dataPromises)
 
       // Process customers with immediate state update
-      if (customersRes instanceof Response && customersRes.ok) {
-        const customersData = await customersRes.json()
-        setCustomers(customersData)
-        console.log("✅ Customers updated:", customersData.length)
-      } else {
-        console.error("Failed to load customers")
-      }
 
-      // Process items
-      if (itemsRes instanceof Response && itemsRes.ok) {
+      // Process other data...
+      if (itemsRes.ok) {
         const itemsData = await itemsRes.json()
         setItems(itemsData)
-      } else {
-        console.error("Failed to load items")
       }
 
-      // Process stats
-      if (statsRes instanceof Response && statsRes.ok) {
+      if (statsRes.ok) {
         const statsData = await statsRes.json()
         setStats(statsData)
-      } else {
-        console.error("Failed to load stats")
       }
 
-      // Process settings
-      if (settingsRes instanceof Response && settingsRes.ok) {
+      if (settingsRes.ok) {
         const settingsData = await settingsRes.json()
         setSettings(settingsData)
-      } else {
-        console.error("Failed to load settings")
       }
 
-      // Process branding
-      if (brandingRes instanceof Response && brandingRes.ok) {
+      if (brandingRes.ok) {
         const brandingData = await brandingRes.json()
         setBrandingSettings(brandingData)
-      } else {
-        console.error("Failed to load branding")
       }
 
-      // Process analytics
-      if (analyticsRes instanceof Response && analyticsRes.ok) {
+      if (analyticsRes.ok) {
         const analyticsData = await analyticsRes.json()
         setAnalytics(analyticsData)
-      } else {
-        console.error("Failed to load analytics")
       }
 
       setLastUpdate(new Date())
@@ -296,32 +280,6 @@ export default function AdminPage() {
     return () => clearInterval(interval)
   }, [isAuthenticated, isOnline, loadData])
 
-  // Make customer list sync even more aggressive - every 500ms for production
-  useEffect(() => {
-    if (!isAuthenticated || !isOnline) return
-
-    const customerInterval = setInterval(async () => {
-      try {
-        const response = await fetch("/api/admin/customers", {
-          cache: "no-store", // Prevent caching
-          headers: {
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-        })
-        if (response.ok) {
-          const customersData = await response.json()
-          setCustomers(customersData)
-        }
-      } catch (error) {
-        console.log("Customer sync error:", error)
-      }
-    }, 500) // Every 500ms for customer list in production
-
-    return () => clearInterval(customerInterval)
-  }, [isAuthenticated, isOnline])
-
   // Add automatic force refresh every 10 seconds in production
   useEffect(() => {
     if (!isAuthenticated || !isOnline) return
@@ -349,6 +307,23 @@ export default function AdminPage() {
 
     return () => clearInterval(interval)
   }, [isAuthenticated])
+
+  // Add this new useEffect for immediate refresh after customer creation:
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    // Listen for storage events (when customer is created in another tab/component)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "customer_created") {
+        console.log("🚀 Customer creation detected, refreshing...")
+        loadData(false)
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange)
+    return () => window.removeEventListener("storage", handleStorageChange)
+  }, [isAuthenticated, loadData])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -537,7 +512,7 @@ export default function AdminPage() {
 
       if (response.ok) {
         setSelectedCustomers([])
-        loadData(false) // Refresh data after deletion
+        refetchCustomers()
         alert(`${selectedCustomers.length} customers deleted successfully!`)
       } else {
         const errorData = await response.json()
@@ -583,7 +558,7 @@ export default function AdminPage() {
 
       if (response.ok) {
         setSelectedCustomers([])
-        loadData(false) // Refresh data after deletion
+        refetchCustomers()
         alert("All customers deleted successfully!")
       } else {
         const errorData = await response.json()
@@ -871,7 +846,9 @@ export default function AdminPage() {
                   <div>
                     <CardTitle>Customer Management</CardTitle>
                     <CardDescription>
-                      All registered customers and their points (Auto-updates every 5 seconds)
+                      All registered customers and their points (Last updated:{" "}
+                      {customersLastUpdate.toLocaleTimeString()})
+                      {customersError && <span className="text-red-600 ml-2">• {customersError}</span>}
                     </CardDescription>
                   </div>
                   <div className="flex space-x-2">
